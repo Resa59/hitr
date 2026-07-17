@@ -1,0 +1,14 @@
+{
+  "$schema": "https://raw.githubusercontent.com/cloudflare/workers-sdk/main/packages/wrangler/config-schema.json",
+  "name": "hitr",
+  "main": "index.js",
+  "compatibility_date": "2026-07-17",
+  "workers_dev": true,
+  "minify": true,
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "hitr-db","database_id": "4f909104-b182-4d32-bc1e-642779925347"
+    }
+  ]
+}
