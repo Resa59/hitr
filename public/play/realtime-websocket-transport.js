@@ -65,6 +65,7 @@
       this.userClosed = false;
       this.probeTimer = null;
       this.handshakeTimer = null;
+      this.localHandoffTimer = null;
       this.connecting = new Set();
       this.selectionPending = false;
       this.cloudConfirmed = false;
@@ -83,6 +84,25 @@
     localWsUrl(base) {
       return `${String(base).replace(/\/$/, "").replace(/^http/i, "ws")}/api/realtime/ws?sid=${encodeURIComponent(this.descriptor.sessionId)}`;
     }
+    isLoopbackBase(base) {
+      try {
+        const host = new URL(String(base)).hostname.toLowerCase();
+        return host === "127.0.0.1" || host === "localhost" || host === "::1" || host === "[::1]";
+      } catch (_) { return false; }
+    }
+    async tryInitialLoopbackHandoff() {
+      const loopback = (this.descriptor.localCandidates || []).find(base => this.isLoopbackBase(base));
+      if (!loopback || this.currentLocalBase()) return false;
+      const target = await this.probeCandidate(loopback, 750);
+      if (!target || this.userClosed) return false;
+      this.onTransport?.("local", "switching");
+      try { this.navigateToLocalTarget(target, false); }
+      catch (error) { this.onError?.(error); return false; }
+      // Bei erfolgreicher Navigation wird dieser JavaScript-Kontext verworfen.
+      // Falls ein Browser die Navigation blockiert, geht es nach kurzer Frist über Cloud weiter.
+      await new Promise(resolve => setTimeout(resolve, 900));
+      return false;
+    }
 
     async connect() {
       this.userClosed = false;
@@ -92,6 +112,8 @@
         try { await this.openLink("local", this.localWsUrl(localBase)); return; }
         catch (error) { this.onError?.(error); }
       }
+      await this.tryInitialLoopbackHandoff();
+      if (this.userClosed) return;
       // Die Cloud-Verbindung authentifiziert und vermittelt zunächst nur.
       // Spielzustände werden erst nach der Transportauswahl freigegeben.
       await this.openLink("cloud", this.cloudWsUrl());
@@ -123,7 +145,7 @@
         const error = new Error(detail || "Verbindungsbestätigung hat zu lange gedauert.");
         this.onError?.(error);
         try { this.links[name]?.close(4008, "handshake-timeout"); } catch (_) { }
-      }, 18000);
+      }, name === "local" ? 4500 : 18000);
     }
 
     clearHandshakeTimeout() {
@@ -159,6 +181,8 @@
     confirmTransport(name) {
       if (name !== "cloud") return;
       this.clearHandshakeTimeout();
+      clearTimeout(this.localHandoffTimer);
+      this.localHandoffTimer = null;
       this.active = "cloud";
       this.cloudConfirmed = true;
       this.onTransport?.("cloud", "welcome");
@@ -178,10 +202,10 @@
       this.probeTimer = setTimeout(() => this.probeLocal(false).catch(() => { }), delay);
     }
 
-    async probeCandidate(candidate) {
+    async probeCandidate(candidate, timeoutMs = 1800) {
       const base = String(candidate).replace(/\/$/, "");
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 1800);
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
         const response = await fetch(`${base}/api/realtime/bootstrap?sid=${encodeURIComponent(this.descriptor.sessionId)}`, {
           cache: "no-store", mode: "cors", signal: controller.signal
@@ -195,6 +219,25 @@
       } finally {
         clearTimeout(timer);
       }
+    }
+
+    navigateToLocalTarget(target, includeHandoff = true) {
+      const url = new URL(target);
+      const current = new URL(location.href);
+      url.hash = current.hash;
+      const params = new URLSearchParams(url.hash.replace(/^#/, ""));
+      if (includeHandoff) {
+        const handoff = global.HitsterRealtimeHandoff?.() || null;
+        if (handoff) {
+          if (handoff.participantId) params.set("pid", handoff.participantId);
+          if (handoff.resumeToken) params.set("resume", handoff.resumeToken);
+          if (handoff.lastSequence) params.set("seq", String(handoff.lastSequence));
+          if (handoff.displayName) params.set("name", handoff.displayName);
+        }
+      }
+      params.set("via", "local");
+      url.hash = params.toString();
+      location.replace(url.toString());
     }
 
     async probeLocal(initial = false) {
@@ -212,23 +255,24 @@
         else this.scheduleLocalProbe(30000);
         return false;
       }
-      const url = new URL(target);
-      const current = new URL(location.href);
-      url.hash = current.hash;
-      const params = new URLSearchParams(url.hash.replace(/^#/, ""));
-      const handoff = global.HitsterRealtimeHandoff?.() || null;
-      if (handoff) {
-        if (handoff.participantId) params.set("pid", handoff.participantId);
-        if (handoff.resumeToken) params.set("resume", handoff.resumeToken);
-        if (handoff.lastSequence) params.set("seq", String(handoff.lastSequence));
-        if (handoff.displayName) params.set("name", handoff.displayName);
-      }
-      params.set("via", "local");
-      url.hash = params.toString();
       this.onTransport?.("local", "switching");
-      try { await Promise.resolve(this.onBeforeLocalSwitch?.()); } catch (_) { }
-      await new Promise(resolve => setTimeout(resolve, 60));
-      location.replace(url.toString());
+      // Cloud bleibt bis zum tatsächlich geladenen lokalen Ziel unangetastet.
+      // Falls Android/der Browser die private HTTP-Navigation blockiert, wählt
+      // diese Seite nach kurzer Frist automatisch wieder die funktionierende Cloud.
+      clearTimeout(this.localHandoffTimer);
+      this.localHandoffTimer = setTimeout(() => {
+        if (this.userClosed || this.active !== "cloud" || this.cloudConfirmed) return;
+        this.onError?.(new Error("Der Wechsel ins lokale WLAN wurde blockiert. Die Cloud-Verbindung wird verwendet."));
+        this.selectCloud().catch(error => this.onError?.(error));
+      }, 2800);
+      try {
+        this.navigateToLocalTarget(target, true);
+      } catch (error) {
+        clearTimeout(this.localHandoffTimer);
+        await this.selectCloud();
+        this.onError?.(error);
+        return false;
+      }
       return true;
     }
 
@@ -256,6 +300,8 @@
       this.userClosed = true;
       this.cloudConfirmed = false;
       clearTimeout(this.probeTimer);
+      clearTimeout(this.localHandoffTimer);
+      this.localHandoffTimer = null;
       this.clearHandshakeTimeout();
       for (const link of Object.values(this.links)) link?.close(code, reason);
       this.links = { cloud: null, local: null };

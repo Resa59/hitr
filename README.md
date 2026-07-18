@@ -1,4 +1,4 @@
-# Hitster Cloudflare 1.4.13 – lokale Transportauswahl vor Spieldaten
+# Hitster Cloudflare 1.4.14 – lokale Transportauswahl vor Spieldaten
 
 Dieser Stand enthält Worker, Durable Objects, Browser-Spieler und TV-Web-App für dauerhafte Räume, bevorzugte WLAN-Direktverbindungen und optionalen Spotify-TV-Ton.
 

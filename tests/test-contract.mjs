@@ -38,4 +38,4 @@ for(const source of [player,tv]) {
   assert(source.includes('onCloudSelected'));
   assert(source.includes('location.replace'));
 }
-console.log('Cloudflare transport-selection persistent-room + Spotify TV audio contract 1.4.13 passed');
+console.log('Cloudflare transport-selection persistent-room + Spotify TV audio contract 1.4.14 passed');

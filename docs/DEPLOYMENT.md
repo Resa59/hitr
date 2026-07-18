@@ -1,4 +1,4 @@
-# Veröffentlichung auf Cloudflare – Stand 1.4.13
+# Veröffentlichung auf Cloudflare – Stand 1.4.14
 
 ## Vollständiger Quellweg
 
@@ -14,7 +14,7 @@
    - `/tv/`
    - `/tv/sw.js`
    - `/.well-known/assetlinks.json`
-7. TV-Seite vollständig neu laden. Der Service-Worker-Cache trägt die Version `hitster-tv-v1.4.13`.
+7. TV-Seite vollständig neu laden. Der Service-Worker-Cache trägt die Version `hitster-tv-v1.4.14`.
 
 ## Wesentlicher Abnahmetest
 
