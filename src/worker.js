@@ -607,3 +607,55 @@ export class PairRoom extends DurableObject {
   }
   async alarm() { for (const ws of this.ctx.getWebSockets()) try { ws.close(1001, "pair expired"); } catch (_) {} await this.ctx.storage.deleteAll(); }
 }
+
+// Kompatibilitätsklasse für den bereits veröffentlichten Durable-Object-Namespace.
+// Der aktuelle Hitster-Stand verwendet diesen Guard nicht mehr aktiv. Die Klasse
+// muss dennoch exportiert bleiben, solange der bestehende Namespace nicht durch
+// eine spätere, ausdrücklich geplante delete_class-Migration entfernt wird.
+export class UsageGuard extends DurableObject {
+  async fetch(request) {
+    const url = new URL(request.url);
+    if (url.pathname !== "/check" || request.method !== "POST") {
+      return json({ ok: false, error: "Nicht gefunden." }, 404);
+    }
+
+    const body = await readJson(request);
+    const kind = clean(body.kind, 40);
+    const limits = {
+      "session-open": { day: 250, window: 50 },
+      "pair-create": { day: 1000, window: 200 },
+      "resolve": { day: 50_000, window: 5_000 }
+    };
+    const limit = limits[kind];
+    if (!limit) return json({ ok: false, error: "Unbekannte Schutzoperation." }, 400);
+
+    const now = Date.now();
+    const day = new Date(now).toISOString().slice(0, 10);
+    const windowId = Math.floor(now / (10 * 60 * 1000));
+    const state = await this.ctx.storage.get("state") || { day, daily: {}, windowId, window: {} };
+    if (state.day !== day) Object.assign(state, { day, daily: {}, windowId, window: {} });
+    if (state.windowId !== windowId) Object.assign(state, { windowId, window: {} });
+
+    const daily = Number(state.daily[kind] || 0);
+    const currentWindow = Number(state.window[kind] || 0);
+    if (daily >= limit.day || currentWindow >= limit.window) {
+      const retryAfter = currentWindow >= limit.window
+        ? Math.max(1, Math.ceil(((windowId + 1) * 10 * 60 * 1000 - now) / 1000))
+        : Math.max(1, Math.ceil(((Date.parse(`${day}T00:00:00Z`) + 86_400_000) - now) / 1000));
+      return json({
+        ok: false,
+        error: "Temporäres Schutzlimit erreicht. Bitte später erneut versuchen.",
+        retryAfter
+      }, 429);
+    }
+
+    state.daily[kind] = daily + 1;
+    state.window[kind] = currentWindow + 1;
+    await this.ctx.storage.put("state", state);
+    return json({
+      ok: true,
+      remainingDay: limit.day - state.daily[kind],
+      remainingWindow: limit.window - state.window[kind]
+    });
+  }
+}
