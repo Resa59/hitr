@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 
 const VERSION = 1;
-const BUILD = "1.4.14";
+const BUILD = "1.4.17";
 const CAPABILITIES = ["transport-selection-v1", "tv-pair-v1", "host-activity-timeout-v1"];
 const MAX_BYTES = 32 * 1024;
 const SESSION_INACTIVITY_MS = 15 * 60 * 1000;

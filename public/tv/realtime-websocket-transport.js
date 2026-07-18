@@ -226,6 +226,23 @@
       const current = new URL(location.href);
       url.hash = current.hash;
       const params = new URLSearchParams(url.hash.replace(/^#/, ""));
+
+      // Bei manueller Raumcode-Eingabe existiert der aufgelöste Descriptor nur
+      // im Arbeitsspeicher der Cloud-Seite. Ohne diese Felder verliert die
+      // lokale Zielseite Session-ID, Einladungstoken und Raumcode.
+      const descriptor = this.descriptor || {};
+      if (descriptor.sessionId) params.set("sid", String(descriptor.sessionId));
+      if (descriptor.role || this.role) params.set("role", String(descriptor.role || this.role));
+      if (descriptor.inviteToken) params.set("invite", String(descriptor.inviteToken));
+      if (descriptor.roomCode) params.set("code", String(descriptor.roomCode).toUpperCase());
+      if (descriptor.cloudBaseUrl) params.set("cloud", String(descriptor.cloudBaseUrl));
+      if (descriptor.expiresAt) params.set("exp", String(descriptor.expiresAt));
+      params.set("v", String(descriptor.v || global.HitsterRealtimeProtocol?.VERSION || 1));
+      params.delete("local");
+      for (const local of Array.isArray(descriptor.localCandidates) ? descriptor.localCandidates : []) {
+        if (local) params.append("local", String(local));
+      }
+
       if (includeHandoff) {
         const handoff = global.HitsterRealtimeHandoff?.() || null;
         if (handoff) {
