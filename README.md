@@ -1,4 +1,4 @@
-# Hitster Cloudflare 1.4.9 – lokale Transportauswahl vor Spieldaten
+# Hitster Cloudflare 1.4.13 – lokale Transportauswahl vor Spieldaten
 
 Dieser Stand enthält Worker, Durable Objects, Browser-Spieler und TV-Web-App für dauerhafte Räume, bevorzugte WLAN-Direktverbindungen und optionalen Spotify-TV-Ton.
 
@@ -24,3 +24,8 @@ Dieser Stand enthält Worker, Durable Objects, Browser-Spieler und TV-Web-App f�
 Spotify-Tokens bleiben zielgerichtet, kurzlebig und vollständig transient. Bei aktivem Spotify-TV-Audio bleibt der Fernseher wegen des erforderlichen sicheren Browserkontexts auf HTTPS/Cloud.
 
 Siehe `docs/DEPLOYMENT.md`, `docs/API.md` und `docs/SPOTIFY_GERAET_ZIELBILD.md`.
+
+## Kompatibilität mit dem bestehenden Worker `hitr`
+
+Der veröffentlichte Worker besitzt zusätzlich den Durable-Object-Namespace `UsageGuard` aus Migration `v2`. Der aktuelle Spielablauf verwendet ihn nicht aktiv, aber `src/worker.js` exportiert die Klasse weiterhin und `wrangler.jsonc` enthält die Bindung `GUARD`. Diese Einträge dürfen ohne ausdrückliche `delete_class`- oder `rename_class`-Migration nicht entfernt werden.
+

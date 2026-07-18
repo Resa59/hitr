@@ -13,10 +13,12 @@
     "bindings": [
       { "name": "SESSIONS", "class_name": "SessionRoom" },
       { "name": "ALIASES", "class_name": "RoomAlias" },
-      { "name": "PAIRS", "class_name": "PairRoom" }
+      { "name": "PAIRS", "class_name": "PairRoom" },
+      { "name": "GUARD", "class_name": "UsageGuard" }
     ]
   },
   "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["SessionRoom", "RoomAlias", "PairRoom"] }
+    { "tag": "v1", "new_sqlite_classes": ["SessionRoom", "RoomAlias", "PairRoom"] },
+    { "tag": "v2", "new_sqlite_classes": ["UsageGuard"] }
   ]
 }

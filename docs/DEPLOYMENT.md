@@ -1,4 +1,4 @@
-# Veröffentlichung auf Cloudflare – Stand 1.4.9
+# Veröffentlichung auf Cloudflare – Stand 1.4.13
 
 ## Vollständiger Quellweg
 
@@ -14,7 +14,7 @@
    - `/tv/`
    - `/tv/sw.js`
    - `/.well-known/assetlinks.json`
-7. TV-Seite vollständig neu laden. Der Service-Worker-Cache trägt die Version `hitster-tv-v1.4.9`.
+7. TV-Seite vollständig neu laden. Der Service-Worker-Cache trägt die Version `hitster-tv-v1.4.13`.
 
 ## Wesentlicher Abnahmetest
 
@@ -45,4 +45,26 @@ Produktionspaket: `de.resa.hitstertrainer`
 
 Produktionszertifikat SHA-256: `27:F6:22:E6:79:0D:91:66:5A:60:67:4B:8A:36:D1:72:2E:6C:77:7F:59:5A:ED:FF:1E:4A:35:92:23:83:A0:DC`
 
-Für 1.4.9 ist keine neue Durable-Object-Migration erforderlich; die vorhandene Migration `v1` bleibt bestehen.
+## Durable-Object-Migrationshistorie
+
+Der bereits veröffentlichte Worker `hitr` besitzt folgende reale Migrationshistorie:
+
+```json
+"migrations": [
+  { "tag": "v1", "new_sqlite_classes": ["SessionRoom", "RoomAlias", "PairRoom"] },
+  { "tag": "v2", "new_sqlite_classes": ["UsageGuard"] }
+]
+```
+
+Außerdem müssen `wrangler.jsonc` und `src/worker.js` weiterhin Folgendes enthalten:
+
+```json
+{ "name": "GUARD", "class_name": "UsageGuard" }
+```
+
+```js
+export class UsageGuard extends DurableObject { /* Kompatibilitätsimplementierung */ }
+```
+
+`UsageGuard` wird vom aktuellen Spielablauf nicht aktiv aufgerufen. Die Klasse muss dennoch exportiert bleiben, weil bereits Durable Objects von diesem veröffentlichten Klassennamen abhängen. Ein Entfernen oder Umbenennen ist nur mit einer ausdrücklich geplanten Cloudflare-Migration zulässig.
+

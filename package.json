@@ -1,9 +1,9 @@
 {
   "name": "hitster-cloud-first-realtime",
   "private": true,
-  "version": "1.4.9",
+  "version": "1.4.13",
   "scripts": {
-    "check": "node --check src/worker.js && node tests/test-contract.mjs && node tests/test-transport-selection.mjs && node tests/test-inactivity-lifecycle.mjs",
+    "check": "node --check src/worker.js && node tests/test-contract.mjs && node tests/test-transport-selection.mjs && node tests/test-inactivity-lifecycle.mjs && node tests/test-pair-flow.mjs",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy"
   },

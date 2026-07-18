@@ -64,6 +64,7 @@
       this.onBeforeLocalSwitch = null;
       this.userClosed = false;
       this.probeTimer = null;
+      this.handshakeTimer = null;
       this.connecting = new Set();
       this.selectionPending = false;
       this.cloudConfirmed = false;
@@ -107,11 +108,27 @@
         link.onClose = (info, transport) => this.linkClosed(transport, info);
         await link.connect();
         this.active = name;
+        this.armHandshakeTimeout(name, "Der Server hat die Verbindung nicht bestätigt.");
         this.onTransport?.(name, "socket-open");
         this.onOpen?.(name);
       } finally {
         this.connecting.delete(name);
       }
+    }
+
+    armHandshakeTimeout(name, detail) {
+      clearTimeout(this.handshakeTimer);
+      this.handshakeTimer = setTimeout(() => {
+        if (this.userClosed) return;
+        const error = new Error(detail || "Verbindungsbestätigung hat zu lange gedauert.");
+        this.onError?.(error);
+        try { this.links[name]?.close(4008, "handshake-timeout"); } catch (_) { }
+      }, 18000);
+    }
+
+    clearHandshakeTimeout() {
+      clearTimeout(this.handshakeTimer);
+      this.handshakeTimer = null;
     }
 
     confirmWelcome(name, payload = {}) {
@@ -120,6 +137,7 @@
         this.descriptor.localCandidates = payload.localCandidates;
       }
       if (name === "local") {
+        this.clearHandshakeTimeout();
         this.cloudConfirmed = false;
         this.onTransport?.("local", "welcome");
         if (this.links.cloud) {
@@ -129,6 +147,7 @@
         return;
       }
       this.onTransport?.("cloud", "bootstrap");
+      this.armHandshakeTimeout("cloud", "Cloudflare hat die Transportauswahl nicht bestätigt. Bitte den aktuellen Worker deployen.");
       if (!this.selectionPending) {
         this.selectionPending = true;
         this.probeLocal(true)
@@ -139,6 +158,7 @@
 
     confirmTransport(name) {
       if (name !== "cloud") return;
+      this.clearHandshakeTimeout();
       this.active = "cloud";
       this.cloudConfirmed = true;
       this.onTransport?.("cloud", "welcome");
@@ -218,6 +238,7 @@
       if (name !== this.active) return;
       this.active = null;
       this.cloudConfirmed = false;
+      this.clearHandshakeTimeout();
       this.onClose?.({ ...info, transport: name, user: false });
       if (name === "local") {
         try { await this.openLink("cloud", this.cloudWsUrl()); }
@@ -235,6 +256,7 @@
       this.userClosed = true;
       this.cloudConfirmed = false;
       clearTimeout(this.probeTimer);
+      this.clearHandshakeTimeout();
       for (const link of Object.values(this.links)) link?.close(code, reason);
       this.links = { cloud: null, local: null };
       this.active = null;

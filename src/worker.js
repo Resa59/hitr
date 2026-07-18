@@ -1,6 +1,8 @@
 import { DurableObject } from "cloudflare:workers";
 
 const VERSION = 1;
+const BUILD = "1.4.13";
+const CAPABILITIES = ["transport-selection-v1", "tv-pair-v1", "host-activity-timeout-v1"];
 const MAX_BYTES = 32 * 1024;
 const SESSION_INACTIVITY_MS = 15 * 60 * 1000;
 const ROOM_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -70,7 +72,10 @@ function publicJoin(descriptor, role, origin) {
     roomCode: descriptor.roomCode,
     localCandidates: Array.isArray(descriptor.localCandidates) ? descriptor.localCandidates : [],
     cloudBaseUrl: descriptor.cloudBaseUrl || origin,
-    expiresAt: Number(descriptor.expiresAt || 0)
+    expiresAt: Number(descriptor.expiresAt || 0),
+    protocolVersion: VERSION,
+    cloudBuild: BUILD,
+    capabilities: CAPABILITIES
   };
 }
 function wsAttachment(ws) { try { return ws.deserializeAttachment() || {}; } catch (_) { return {}; } }
@@ -94,7 +99,7 @@ export default {
         return Response.redirect(`${url.origin}/play/?code=${encodeURIComponent(code)}`, 302);
       }
       if (url.pathname === "/api/health" || url.pathname === "/api/realtime/health") {
-        return cors(json({ ok: true, protocolVersion: VERSION, service: "hitster-cloud-first", realtime: true }));
+        return cors(json({ ok: true, protocolVersion: VERSION, build: BUILD, capabilities: CAPABILITIES, service: "hitster-cloud-first", realtime: true }));
       }
       if (url.pathname === "/api/realtime/session/open" && request.method === "POST") {
         const body = await readJson(request);
@@ -113,7 +118,7 @@ export default {
         const result = await initialized.json();
         if (!initialized.ok) return cors(json(result, initialized.status));
         await env.ALIASES.getByName(code).fetch("https://alias/bind", { method: "POST", body: JSON.stringify(descriptor) });
-        return cors(json({ ok: true, session: result.session || descriptor }));
+        return cors(json({ ok: true, protocolVersion: VERSION, build: BUILD, capabilities: CAPABILITIES, session: result.session || descriptor }));
       }
       if (url.pathname === "/api/realtime/session/update" && request.method === "POST") {
         const body = await readJson(request); const sid = clean(body.sessionId, 180);
@@ -388,7 +393,10 @@ export class SessionRoom extends DurableObject {
       transport: "cloud",
       bootstrapOnly: role !== "host",
       localCandidates: Array.isArray(d.localCandidates) ? d.localCandidates : [],
-      snapshot: null
+      snapshot: null,
+      protocolVersion: VERSION,
+      serverBuild: BUILD,
+      capabilities: CAPABILITIES
     }, { sequence: 0, sender: { role: "server", id: "cloud" }, target: { role, participantId } }));
     if (role === "host") await this.publishPresence();
   }
@@ -606,4 +614,56 @@ export class PairRoom extends DurableObject {
     } catch (_) {}
   }
   async alarm() { for (const ws of this.ctx.getWebSockets()) try { ws.close(1001, "pair expired"); } catch (_) {} await this.ctx.storage.deleteAll(); }
+}
+
+// Kompatibilitätsklasse für den bereits veröffentlichten Durable-Object-Namespace.
+// Der aktuelle Hitster-Stand verwendet diesen Guard nicht mehr aktiv. Die Klasse
+// muss dennoch exportiert bleiben, solange der bestehende Namespace nicht durch
+// eine spätere, ausdrücklich geplante delete_class-Migration entfernt wird.
+export class UsageGuard extends DurableObject {
+  async fetch(request) {
+    const url = new URL(request.url);
+    if (url.pathname !== "/check" || request.method !== "POST") {
+      return json({ ok: false, error: "Nicht gefunden." }, 404);
+    }
+
+    const body = await readJson(request);
+    const kind = clean(body.kind, 40);
+    const limits = {
+      "session-open": { day: 250, window: 50 },
+      "pair-create": { day: 1000, window: 200 },
+      "resolve": { day: 50_000, window: 5_000 }
+    };
+    const limit = limits[kind];
+    if (!limit) return json({ ok: false, error: "Unbekannte Schutzoperation." }, 400);
+
+    const now = Date.now();
+    const day = new Date(now).toISOString().slice(0, 10);
+    const windowId = Math.floor(now / (10 * 60 * 1000));
+    const state = await this.ctx.storage.get("state") || { day, daily: {}, windowId, window: {} };
+    if (state.day !== day) Object.assign(state, { day, daily: {}, windowId, window: {} });
+    if (state.windowId !== windowId) Object.assign(state, { windowId, window: {} });
+
+    const daily = Number(state.daily[kind] || 0);
+    const currentWindow = Number(state.window[kind] || 0);
+    if (daily >= limit.day || currentWindow >= limit.window) {
+      const retryAfter = currentWindow >= limit.window
+        ? Math.max(1, Math.ceil(((windowId + 1) * 10 * 60 * 1000 - now) / 1000))
+        : Math.max(1, Math.ceil(((Date.parse(`${day}T00:00:00Z`) + 86_400_000) - now) / 1000));
+      return json({
+        ok: false,
+        error: "Temporäres Schutzlimit erreicht. Bitte später erneut versuchen.",
+        retryAfter
+      }, 429);
+    }
+
+    state.daily[kind] = daily + 1;
+    state.window[kind] = currentWindow + 1;
+    await this.ctx.storage.put("state", state);
+    return json({
+      ok: true,
+      remainingDay: limit.day - state.daily[kind],
+      remainingWindow: limit.window - state.window[kind]
+    });
+  }
 }
