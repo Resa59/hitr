@@ -1,13 +1,11 @@
 {
-  "name": "hitster-cloud-realtime-mobile",
+  "name": "hitster-cloud-first-realtime",
   "private": true,
-  "version": "1.4.2-realtime-v3.1",
-  "type": "module",
+  "version": "1.4.9",
   "scripts": {
-    "check": "node --check index.js",
+    "check": "node --check src/worker.js && node tests/test-contract.mjs && node tests/test-transport-selection.mjs && node tests/test-inactivity-lifecycle.mjs",
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "deploy:dry": "wrangler deploy --dry-run"
+    "deploy": "wrangler deploy"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"
