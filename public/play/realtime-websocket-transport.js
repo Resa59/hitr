@@ -62,6 +62,8 @@
       this.onTransport = null;
       this.onCloudSelected = null;
       this.onBeforeLocalSwitch = null;
+      this.onLocalUnavailable = null;
+      this.canSwitchLocal = typeof options.canSwitchLocal === "function" ? options.canSwitchLocal : (() => true);
       this.userClosed = false;
       this.probeTimer = null;
       this.handshakeTimer = null;
@@ -90,7 +92,27 @@
         return host === "127.0.0.1" || host === "localhost" || host === "::1" || host === "[::1]";
       } catch (_) { return false; }
     }
+    orderedCandidates() {
+      const values = [...new Set((this.descriptor.localCandidates || []).map(String).filter(Boolean))].slice(0, 8);
+      const pageIsLoopback = this.isLoopbackBase(location.origin);
+      return values.sort((a, b) => {
+        const al = this.isLoopbackBase(a), bl = this.isLoopbackBase(b);
+        if (al === bl) return 0;
+        // Auf einer Cloud-Seite zuerst die LAN-Adresse prüfen. Auf einer bereits
+        // lokalen Seite bleibt Loopback der bevorzugte Same-Device-Weg.
+        return pageIsLoopback ? (al ? -1 : 1) : (al ? 1 : -1);
+      });
+    }
+    directTarget(base) {
+      const root = String(base || "").replace(/\/$/, "");
+      return root ? `${root}${this.localPath}` : "";
+    }
+    localSwitchAllowed() {
+      try { return this.canSwitchLocal?.() !== false; }
+      catch (_) { return false; }
+    }
     async tryInitialLoopbackHandoff() {
+      if (!this.localSwitchAllowed()) return false;
       const loopback = (this.descriptor.localCandidates || []).find(base => this.isLoopbackBase(base));
       if (!loopback || this.currentLocalBase()) return false;
       const target = await this.probeCandidate(loopback, 750);
@@ -202,23 +224,57 @@
       this.probeTimer = setTimeout(() => this.probeLocal(false).catch(() => { }), delay);
     }
 
-    async probeCandidate(candidate, timeoutMs = 1800) {
+    async probeCandidate(candidate, timeoutMs = 2400) {
       const base = String(candidate).replace(/\/$/, "");
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
-      try {
-        const response = await fetch(`${base}/api/realtime/bootstrap?sid=${encodeURIComponent(this.descriptor.sessionId)}`, {
-          cache: "no-store", mode: "cors", signal: controller.signal
-        });
-        if (!response.ok) return null;
-        const data = await response.json();
-        const target = this.role === "tv" ? data.tvUrl : data.clientUrl;
-        return target ? String(target) : null;
-      } catch (_) {
-        return null;
-      } finally {
-        clearTimeout(timer);
+      const endpoint = `${base}/api/realtime/bootstrap?sid=${encodeURIComponent(this.descriptor.sessionId)}&t=${Date.now()}`;
+      const addressSpace = this.isLoopbackBase(base) ? "loopback" : "local";
+      // Kiwi/Chromium-Versionen unterscheiden sich bei Local Network Access.
+      // Zuerst wird die aktuelle API verwendet, danach ein kompatibler Abruf ohne
+      // die experimentelle Option. Private IP-Literale können dabei selbst den
+      // Browser-Berechtigungsdialog auslösen.
+      for (const includeAddressSpace of [true, false]) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+          const options = { cache: "no-store", mode: "cors", credentials: "omit", redirect: "error", signal: controller.signal };
+          if (includeAddressSpace) options.targetAddressSpace = addressSpace;
+          const response = await fetch(endpoint, options);
+          if (!response.ok) continue;
+          const data = await response.json();
+          const target = this.role === "tv" ? data.tvUrl : data.clientUrl;
+          if (target) return String(target);
+        } catch (_) {
+          // Der zweite Durchlauf deckt Browser ohne targetAddressSpace ab.
+        } finally { clearTimeout(timer); }
       }
+      return null;
+    }
+
+    async retryLocal() {
+      if (this.userClosed || this.active === "local") return true;
+      if (!this.localSwitchAllowed()) throw new Error("Diese Funktion benötigt derzeit die sichere Cloud-Verbindung.");
+      const candidates = this.orderedCandidates();
+      if (!candidates.length) throw new Error("Das Haupthandy hat keine lokale Adresse gemeldet.");
+      this.onTransport?.("local", "probing");
+      for (const candidate of candidates) {
+        const target = await this.probeCandidate(candidate, 4200);
+        if (!target) continue;
+        this.onTransport?.("local", "switching");
+        this.navigateToLocalTarget(target, true);
+        return true;
+      }
+      this.onLocalUnavailable?.({ candidates, manual: true });
+      // Ein aktiver Nutzerklick darf als letzter Versuch direkt zur privaten
+      // Adresse navigieren. Manche Chromium-/TV-Browser blockieren den
+      // vorgelagerten HTTPS→HTTP-fetch, erlauben aber die eigentliche
+      // Top-Level-Navigation ins lokale Netz.
+      const direct = this.directTarget(candidates[0]);
+      if (direct) {
+        this.onTransport?.("local", "switching");
+        this.navigateToLocalTarget(direct, true);
+        return true;
+      }
+      throw new Error("Der lokale Server ist aus diesem Browser nicht erreichbar. Prüfe die Berechtigung für den Zugriff auf das lokale Netzwerk oder verwende weiter die Cloud-Verbindung.");
     }
 
     navigateToLocalTarget(target, includeHandoff = true) {
@@ -259,15 +315,26 @@
 
     async probeLocal(initial = false) {
       if (this.userClosed || this.active === "local") return true;
-      const candidates = [...new Set((this.descriptor.localCandidates || []).map(String).filter(Boolean))].slice(0, 8);
+      if (!this.localSwitchAllowed()) {
+        this.onTransport?.("cloud", "secure-audio");
+        if (initial) await this.selectCloud();
+        return false;
+      }
+      const candidates = this.orderedCandidates();
       if (!candidates.length) {
+        this.onLocalUnavailable?.({ candidates: [], manual: false });
         if (initial) await this.selectCloud();
         return false;
       }
       this.onTransport?.("local", "probing");
-      const results = await Promise.all(candidates.map(candidate => this.probeCandidate(candidate)));
-      const target = results.find(Boolean);
+      let target = null;
+      for (const candidate of candidates) {
+        target = await this.probeCandidate(candidate);
+        if (target) break;
+      }
       if (!target) {
+        this.onTransport?.("cloud", "local-unavailable");
+        this.onLocalUnavailable?.({ candidates, manual: false });
         if (initial) await this.selectCloud();
         else this.scheduleLocalProbe(30000);
         return false;
@@ -300,11 +367,23 @@
       this.active = null;
       this.cloudConfirmed = false;
       this.clearHandshakeTimeout();
-      this.onClose?.({ ...info, transport: name, user: false });
+
+      // Fällt ein lokaler Direktweg weg (WLAN verlassen, Netzwechsel oder
+      // Android-Server kurz nicht erreichbar), bleibt derselbe Browser-Client
+      // erhalten und verbindet sich sofort über die Cloud neu. Der äußere
+      // Reconnect-Mechanismus wird erst bemüht, wenn auch dieser Fallback
+      // scheitert; dadurch entstehen weder doppelte Transportinstanzen noch
+      // verlorene Teilnehmerzustände.
       if (name === "local") {
-        try { await this.openLink("cloud", this.cloudWsUrl()); }
-        catch (error) { this.onError?.(error); }
+        this.onTransport?.("cloud", "fallback");
+        try {
+          await this.openLink("cloud", this.cloudWsUrl());
+          return;
+        } catch (error) {
+          this.onError?.(error);
+        }
       }
+      this.onClose?.({ ...info, transport: name, user: false, fallbackFailed: name === "local" });
     }
 
     send(value) {

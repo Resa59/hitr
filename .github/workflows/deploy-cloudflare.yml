@@ -2,8 +2,7 @@ name: Deploy Hitster Cloudflare
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -18,12 +17,10 @@ jobs:
     name: Deploy Worker
     runs-on: ubuntu-latest
     timeout-minutes: 15
-
     steps:
       - name: Repository laden
         uses: actions/checkout@v4
-
-      - name: Zu Cloudflare deployen
+      - name: Hitster zu Cloudflare deployen
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}

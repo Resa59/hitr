@@ -111,7 +111,7 @@
       "playerInviteToken", "tvInviteToken", "roundKey", "automaticCorrect", "finalCorrect"
     ]);
     if (clean && Array.isArray(clean.participants)) {
-      clean.participants = clean.participants.map(p => ({ participantId: p.participantId, name: p.name }));
+      clean.participants = clean.participants.map(p => ({ participantId: p.participantId, name: p.name, host: !!p.host, online: p.online !== false }));
     }
     return clean;
   }

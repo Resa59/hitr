@@ -1,4 +1,4 @@
-# API-Vertrag 1.4.17
+# API-Vertrag 1.4.18
 
 ## Öffentliche Links
 
