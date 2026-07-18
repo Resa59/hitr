@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
+  <meta name="theme-color" content="#100b22">
+  <title>Hitster TV</title>
+  <link rel="manifest" href="/tv/manifest.webmanifest">
+  <link rel="stylesheet" href="/tv/tv.css">
+  <script defer src="/tv/hitster-realtime-protocol.js"></script>
+  <script defer src="/tv/realtime-websocket-transport.js"></script>
+  <script defer src="/tv/spotify-tv-audio.js"></script>
+  <script defer src="/tv/tv.js"></script>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <div class="record-logo" aria-hidden="true"><span></span></div>
+    <div class="brand-copy"><small>RESA LUKAS DÖRRENBERG</small><h1>Hitster TV</h1></div>
+  </div>
+  <div class="top-actions">
+    <div class="connection"><span id="dot" class="dot"></span><span id="connection" class="connection-label">Nicht verbunden</span></div>
+    <button id="tvAudioButton" class="fullscreen tv-audio-button hidden" type="button" data-state="idle">TV-Ton</button>
+    <button id="fullscreenButton" class="fullscreen" type="button">Vollbild</button>
+  </div>
+</header>
+<main>
+  <section id="join" class="panel join">
+    <span class="eyebrow">FERNSEHER VERBINDEN</span>
+    <h2>Mit Hitster verbinden</h2>
+    <p>Gib den Raumcode vom Haupthandy ein. Private Eingaben werden grundsätzlich nicht an den Fernseher übertragen.</p>
+    <label>Raumcode<input id="code" maxlength="12" autocapitalize="characters" autocomplete="one-time-code" inputmode="text"></label>
+    <button id="joinButton" class="primary">Verbinden</button>
+    <div id="joinMessage" class="message" role="status"></div>
+  </section>
+
+  <section id="stage" class="panel stage hidden" data-phase="connecting">
+    <div class="stage-head">
+      <div class="stage-head-copy"><div id="round" class="round"></div><h2 id="headline" class="headline">Hitster TV</h2><p id="subline" class="subline">Warte auf das Haupthandy</p></div>
+      <div id="playerBadge" class="player-badge hidden"><span>AKTUELL</span><b id="currentPlayer"></b></div>
+    </div>
+
+    <div id="stageBody" class="stage-body">
+      <div id="hero" class="hero">
+        <div id="disc" class="disc"><span class="disc-label"></span></div>
+        <div id="song" class="song hidden"><span class="eyebrow">AUFLÖSUNG</span><h3 id="songTitle"></h3><p id="songArtist"></p><p id="songYear" class="year"></p></div>
+      </div>
+      <div id="progress" class="metrics"></div>
+      <div id="roundResults" class="result-grid hidden"></div>
+      <section id="scoreSection" class="score-section hidden">
+        <div class="section-title"><div><span class="eyebrow">PUNKTESTAND</span><h3>Rangliste</h3></div></div>
+        <div id="ranking" class="ranking"></div>
+      </section>
+      <section id="statisticsSection" class="statistics hidden">
+        <div class="section-title"><div><span class="eyebrow">SPIELSTATISTIKEN</span><h3 id="statisticsTitle">Vergleich</h3></div></div>
+        <div id="statHighlights" class="stat-highlights"></div>
+        <div id="categoryStats" class="category-stats"></div>
+      </section>
+    </div>
+
+    <div class="stage-footer">
+      <div id="privacyNote" class="privacy-note hidden">Die Eingabe findet privat auf dem Handy statt.</div>
+      <div id="pager" class="pager hidden"><button id="previousPage" type="button" aria-label="Vorherige Seite">‹</button><span id="pageInfo" class="page-info">1 / 1</span><button id="nextPage" type="button" aria-label="Nächste Seite">›</button></div>
+      <button id="nextSession" class="secondary next hidden">Neuen Fernseher-Code anzeigen</button>
+    </div>
+  </section>
+</main>
+</body>
+</html>

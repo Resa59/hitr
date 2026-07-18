@@ -1,0 +1,10 @@
+{
+  "name": "Hitster TV",
+  "short_name": "Hitster TV",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#080a0e",
+  "theme_color": "#100b22",
+  "description": "Fernsehanzeige für private Hitster-Partien"
+}

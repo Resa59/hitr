@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "de.resa.hitstertrainer",
+      "sha256_cert_fingerprints": [
+        "27:F6:22:E6:79:0D:91:66:5A:60:67:4B:8A:36:D1:72:2E:6C:77:7F:59:5A:ED:FF:1E:4A:35:92:23:83:A0:DC"
+      ]
+    }
+  }
+]
