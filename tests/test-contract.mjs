@@ -9,7 +9,7 @@ assert(worker.includes('TV_AUDIO_TOKEN')&&worker.includes('HOST_TYPES'),'TV audi
 assert(!worker.includes('message.type === "TV_AUDIO_TOKEN"'),'TV audio token must never be stored as snapshot');
 assert(tvAudio.includes('Spotify.Player')&&tvAudio.includes('activateElement'),'Spotify Web Playback controller');
 assert(tvAudio.includes('token-request')&&tvAudio.includes('TV_AUDIO_TOKEN'),'short-lived token handshake');
-assert(tvAudio.includes('return !this.audioRequested && !this.connectedToSpotify'),'secure cloud path prevents local switch while TV audio is active');
+assert(tvAudio.includes('Spotify.Player')&&tvAudio.includes('TV_AUDIO_CAPABILITY'),'TV-Webplayer und Cloud-Steuerung bleiben erhalten');
 
 assert(worker.includes('shortJoin')&&worker.includes('/play/?code='),'short player join route');
 assert(worker.includes('tvAppLink')&&worker.includes('/open-app.html'),'TV HTTPS app-link route');
@@ -34,8 +34,13 @@ assert(worker.includes('setAlarm(expiresAt)'),'session and alias expiry alarms')
 for(const source of [player,tv]) {
   assert(source.includes('CloudFirstRealtimeTransport'));
   assert(source.includes('openLink("cloud"'));
-  assert(source.includes('probeLocal(true)'));
+  assert(source.includes('probeLocal(false)'));
   assert(source.includes('onCloudSelected'));
-  assert(source.includes('location.replace'));
+  assert(source.includes('cloudConnected'));
+  assert(source.includes('localConnected'));
+  assert(!source.includes('location.replace'));
+  assert(!source.includes('navigateToLocalTarget'));
 }
-console.log('Cloudflare transport-selection persistent-room + Spotify TV audio contract 1.4.17 passed');
+assert(worker.includes('DELIVERY_BATCH')&&worker.includes('routeDeliveryBatch'),'gebündelter Cloud-Fallback');
+assert(worker.includes('LOCAL_CANDIDATES'),'seltene LAN-Kandidatenaktualisierung');
+console.log('Cloudflare Hybridtransport + persistenter Raum + Spotify-TV-Vertrag 1.4.18-diagnose3 bestanden');

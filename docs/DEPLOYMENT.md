@@ -1,69 +1,39 @@
-# Veröffentlichung auf Cloudflare – Stand 1.4.17
+# Veröffentlichung auf Cloudflare – Stand 1.4.18-diagnose3
 
-## Vollständiger Quellweg
+## Termux
 
-1. Den bisherigen Worker-Stand sichern.
-2. Den Inhalt dieses Verzeichnisses in das mit dem Worker `hitr` verbundene Repository übernehmen.
-3. `npm install` ausführen.
-4. `npm run check` ausführen. Dabei werden Syntax, statischer Vertrag und der Laufzeittest der Transportauswahl geprüft.
-5. Mit dem richtigen Cloudflare-Konto `npm run deploy` ausführen.
-6. Anschließend prüfen:
-   - `/api/health`
-   - `/api/realtime/health`
-   - `/play/`
-   - `/tv/`
-   - `/tv/sw.js`
-   - `/.well-known/assetlinks.json`
-7. TV-Seite vollständig neu laden. Der Service-Worker-Cache trägt die Version `hitster-tv-v1.4.17`.
+```bash
+hitster-cloudflare-push "/storage/emulated/0/Download/Hitster-1.4.18-diagnose3-Cloudflare-Paket.zip"
+```
+
+## Manuell
+
+1. bisherigen Workerstand sichern.
+2. vollständigen Paketinhalt in das Repository `Resa59/hitr` übernehmen.
+3. `npm install`.
+4. `npm run check`.
+5. `npm run deploy`.
+6. `/api/health` muss `1.4.18-diagnose3` melden.
+7. `/play/`, `/tv/`, `/tv/sw.js` und App Links prüfen.
+8. TV-Seite vollständig neu laden; Cachekennung: `hitster-tv-v1.4.18-diagnose3`.
 
 ## Wesentlicher Abnahmetest
 
-1. Raum auf dem Haupthandy öffnen.
-2. Mit einem Gerät im selben WLAN beitreten.
-3. Im Cloudflare-Log darf vor der Transportauswahl kein Spielsnapshot erscheinen.
-4. Der Browser muss den lokalen Bootstrap parallel prüfen und anschließend auf die lokale URL wechseln.
-5. Bei ausgeschaltetem WLAN muss stattdessen `TRANSPORT_SELECTED: cloud` folgen und ein frischer gezielter Snapshot eintreffen.
-6. Bei später wieder verfügbarem WLAN muss der Client von Cloud auf lokal wechseln und in Cloud nicht mehr als aktiver Empfänger gezählt werden.
-7. Nach 15 Minuten ohne echte Host-Aktivität muss Cloudflare `SESSION_ENDED` senden und Sitzung sowie Alias entfernen.
+1. Haupthandy und Spieler in getrennten Netzen: Cloud-only muss funktionieren.
+2. beide in Heim-WLAN/Hotspot: Browser erhält private IP, niemals Loopback.
+3. Cloud-WebSocket bleibt verbunden; lokaler WebSocket kommt zusätzlich hinzu.
+4. während des Spiels WLAN am Spieler trennen: Browser bleibt auf Cloudflare und kommuniziert weiter.
+5. WLAN wieder aktivieren: lokaler Kanal darf später zurückkehren.
+6. ein logisches Hostereignis darf nur eine Cloud-Batchnachricht für alle Cloudempfänger erzeugen.
+7. nach 15 Minuten echter Inaktivität müssen Session und Alias verschwinden.
 
-## Cloudflare-Ressourcen
+## Cloudflare-Kompatibilität
 
-- Die Cloud bleibt für Raumauflösung und Fallback notwendig.
-- Reine WLAN-Teilnehmer erzeugen nach dem Bootstrap keine laufenden Spielzustandsnachrichten über Cloudflare.
-- Spielsnapshots werden nicht dauerhaft gespeichert.
-- Unveränderte lokale Kandidaten und Aliasse werden nicht erneut geschrieben.
-- Ein Host-Aktivitäts-Lease wird nur bei neuer Aktivität und höchstens alle fünf Minuten erneuert.
-- Nach 15 Minuten ohne Host-Aktivität werden Raum, Sockets und Alias per Alarm gelöscht.
+Nicht entfernen:
 
-## Spotify-TV-Audio
-
-Spotify Web Playback benötigt HTTPS. Sobald TV-Audio angefordert oder verbunden ist, bleibt die TV-Seite bewusst auf dem sicheren Cloud-Weg. Der Audiostream läuft direkt zwischen Spotify und Fernseher; Cloudflare überträgt nur die Steuer-/Tokennachrichten.
-
-## App-Link-Verifikation
-
-Produktionspaket: `de.resa.hitstertrainer`
-
-Produktionszertifikat SHA-256: `27:F6:22:E6:79:0D:91:66:5A:60:67:4B:8A:36:D1:72:2E:6C:77:7F:59:5A:ED:FF:1E:4A:35:92:23:83:A0:DC`
-
-## Durable-Object-Migrationshistorie
-
-Der bereits veröffentlichte Worker `hitr` besitzt folgende reale Migrationshistorie:
-
-```json
-"migrations": [
-  { "tag": "v1", "new_sqlite_classes": ["SessionRoom", "RoomAlias", "PairRoom"] },
-  { "tag": "v2", "new_sqlite_classes": ["UsageGuard"] }
-]
-```
-
-Außerdem müssen `wrangler.jsonc` und `src/worker.js` weiterhin Folgendes enthalten:
-
-```json
-{ "name": "GUARD", "class_name": "UsageGuard" }
-```
-
-```js
-export class UsageGuard extends DurableObject { /* Kompatibilitätsimplementierung */ }
-```
-
-`UsageGuard` wird vom aktuellen Spielablauf nicht aktiv aufgerufen. Die Klasse muss dennoch exportiert bleiben, weil bereits Durable Objects von diesem veröffentlichten Klassennamen abhängen. Ein Entfernen oder Umbenennen ist nur mit einer ausdrücklich geplanten Cloudflare-Migration zulässig.
+- `SessionRoom`
+- `RoomAlias`
+- `PairRoom`
+- `UsageGuard`
+- Bindung `GUARD`
+- Migration `v2`

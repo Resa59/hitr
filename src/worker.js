@@ -1,14 +1,14 @@
 import { DurableObject } from "cloudflare:workers";
 
 const VERSION = 1;
-const BUILD = "1.4.18-diagnose1";
-const CAPABILITIES = ["transport-selection-v1", "tv-pair-v1", "host-activity-timeout-v1"];
+const BUILD = "1.4.18-diagnose3";
+const CAPABILITIES = ["transport-selection-v1", "hybrid-data-channel-v1", "delivery-batch-v1", "tv-pair-v1", "host-activity-timeout-v1"];
 const MAX_BYTES = 32 * 1024;
 const SESSION_INACTIVITY_MS = 15 * 60 * 1000;
 const ROOM_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const PLAYER_TYPES = new Set(["TRANSPORT_SELECTED", "ANSWER_SUBMITTED", "SCORE_CONFIRMED", "CLIENT_READY", "ACK", "PING", "LEAVE"]);
 const TV_TYPES = new Set(["TRANSPORT_SELECTED", "TV_READY", "TV_AUDIO_CAPABILITY", "ACK", "PING", "LEAVE"]);
-const HOST_TYPES = new Set(["PLAYER_SNAPSHOT", "PLAYER_STATE", "PLAYER_PRIVATE_STATE", "TV_SNAPSHOT", "TV_STATE", "SESSION_ENDED", "ERROR", "PRESENCE", "TV_AUDIO_TOKEN"]);
+const HOST_TYPES = new Set(["PLAYER_SNAPSHOT", "PLAYER_STATE", "PLAYER_PRIVATE_STATE", "TV_SNAPSHOT", "TV_STATE", "SESSION_ENDED", "ERROR", "PRESENCE", "TV_AUDIO_TOKEN", "DELIVERY_BATCH"]);
 const ANDROID_ASSET_LINKS = [{
   relation: ["delegate_permission/common.handle_all_urls"],
   target: {
@@ -281,6 +281,15 @@ export class SessionRoom extends DurableObject {
         d.localCandidates = nextCandidates;
         this.descriptor = d;
         await this.ctx.storage.put("descriptor", d);
+        // Nur eine tatsächliche Adressänderung wird über den ohnehin bestehenden
+        // Cloud-Kontrollkanal verteilt. Lokalkanal verfügbar/verloren bleibt rein lokal.
+        const update = envelope("LOCAL_CANDIDATES", d.sessionId, { localCandidates: nextCandidates }, {
+          sender: { role: "host", id: d.hostInstanceId }, target: { role: "all", participantId: null }
+        });
+        for (const socket of this.sockets()) {
+          const a = wsAttachment(socket);
+          if (a.authenticated && a.role !== "host") safeSend(socket, update);
+        }
       }
       return json({ ok: true, descriptorChanged, localCandidates: d.localCandidates || [], descriptor: d });
     }
@@ -351,12 +360,14 @@ export class SessionRoom extends DurableObject {
 
     let participantId = role === "host" ? d.hostInstanceId : clean(p.participantId, 180);
     let resumeToken = clean(p.resumeToken, 240);
+    let deviceId = clean(p.clientId || p.deviceId, 180);
     let record = null;
     let participantPersisted = role === "host";
     let participantDirty = false;
     if (role === "host") {
       resumeToken = d.hostInviteToken;
-      record = { participantId, resumeToken, role, displayName: "Haupthandy" };
+      deviceId = deviceId || participantId;
+      record = { participantId, resumeToken, role, displayName: "Haupthandy", deviceId };
     } else {
       const storedRecord = participantId ? await this.ctx.storage.get(`participant:${participantId}`) : null;
       participantPersisted = !!storedRecord && storedRecord.role === role && !!resumeToken && storedRecord.resumeToken === resumeToken;
@@ -367,10 +378,14 @@ export class SessionRoom extends DurableObject {
           participantDirty = nextDisplayName !== record.displayName;
           record.displayName = nextDisplayName;
         }
+        const nextDeviceId = deviceId || record.deviceId || participantId;
+        participantDirty = participantDirty || nextDeviceId !== record.deviceId;
+        record.deviceId = nextDeviceId;
       } else {
         participantId = participantId.length >= 8 ? participantId : token(18);
         resumeToken = token(24);
-        record = { participantId, resumeToken, role, displayName: clean(p.displayName || (role === "tv" ? "Hitster TV" : "Spieler"), 80) };
+        deviceId = deviceId || participantId;
+        record = { participantId, resumeToken, role, displayName: clean(p.displayName || (role === "tv" ? "Hitster TV" : "Spieler"), 80), deviceId };
       }
       // Ein reiner Cloud-Bootstrap soll keine Durable-Object-Schreiboperation
       // verursachen. Der Teilnehmerdatensatz wird erst bei Cloud-Auswahl gespeichert.
@@ -384,12 +399,14 @@ export class SessionRoom extends DurableObject {
         try { other.close(4001, "replaced"); } catch (_) {}
       }
     }
-    const attachment = { authenticated: true, selected: role === "host", participantPersisted, participantDirty, role, participantId, resumeToken, displayName: record.displayName, joinedAt: Date.now() };
+    deviceId = record.deviceId || deviceId || participantId;
+    const attachment = { authenticated: true, selected: role === "host", participantPersisted, participantDirty, role, participantId, resumeToken, displayName: record.displayName, deviceId, joinedAt: Date.now() };
     ws.serializeAttachment(attachment);
     safeSend(ws, envelope("WELCOME", d.sessionId, {
       role,
       participantId,
       resumeToken,
+      deviceId,
       transport: "cloud",
       bootstrapOnly: role !== "host",
       localCandidates: Array.isArray(d.localCandidates) ? d.localCandidates : [],
@@ -410,8 +427,8 @@ export class SessionRoom extends DurableObject {
     if (selected === "cloud") {
       const becameSelected = !attachment.selected;
       const priorRoster = roster[attachment.participantId];
-      const rosterChanged = !priorRoster || priorRoster.role !== attachment.role || priorRoster.displayName !== attachment.displayName;
-      const participantRecord = { participantId: attachment.participantId, resumeToken: attachment.resumeToken, role: attachment.role, displayName: attachment.displayName };
+      const rosterChanged = !priorRoster || priorRoster.role !== attachment.role || priorRoster.displayName !== attachment.displayName || priorRoster.deviceId !== attachment.deviceId;
+      const participantRecord = { participantId: attachment.participantId, resumeToken: attachment.resumeToken, role: attachment.role, displayName: attachment.displayName, deviceId: attachment.deviceId };
       if (!attachment.participantPersisted || attachment.participantDirty) {
         await this.ctx.storage.put(`participant:${attachment.participantId}`, participantRecord);
         attachment.participantPersisted = true;
@@ -419,7 +436,7 @@ export class SessionRoom extends DurableObject {
       }
       attachment.selected = true;
       ws.serializeAttachment(attachment);
-      roster[attachment.participantId] = { participantId: attachment.participantId, role: attachment.role, displayName: attachment.displayName };
+      roster[attachment.participantId] = { participantId: attachment.participantId, role: attachment.role, displayName: attachment.displayName, deviceId: attachment.deviceId };
       if (rosterChanged) await this.ctx.storage.put("roster", roster);
       presenceChanged = becameSelected;
       safeSend(ws, envelope("TRANSPORT_CONFIRMED", d.sessionId, { transport: "cloud", participantId: attachment.participantId, needsSnapshot: true }, {
@@ -482,7 +499,8 @@ export class SessionRoom extends DurableObject {
         if (!HOST_TYPES.has(message.type)) throw new Error("Host-Nachrichtentyp nicht erlaubt.");
         // Spielzustände werden bewusst nicht im Durable Object gespeichert.
         // Der Host liefert nach abgeschlossener Transportwahl einen frischen Snapshot.
-        this.routeFromHost(message);
+        if (message.type === "DELIVERY_BATCH") this.routeDeliveryBatch(message, d);
+        else this.routeFromHost(message);
       } else {
         const allowed = a.role === "tv" ? TV_TYPES : PLAYER_TYPES;
         if (!allowed.has(message.type)) throw new Error("Client-Nachrichtentyp nicht erlaubt.");
@@ -504,6 +522,22 @@ export class SessionRoom extends DurableObject {
       safeSend(ws, message);
     }
   }
+  routeDeliveryBatch(batch, descriptor) {
+    const deliveries = Array.isArray(batch.payload?.deliveries) ? batch.payload.deliveries : [];
+    if (!deliveries.length || deliveries.length > 24) throw new Error("Ungültiger Zustellungs-Batch.");
+    for (const delivery of deliveries) {
+      const recipients = new Set(Array.isArray(delivery?.recipients) ? delivery.recipients.map(value => clean(value, 180)).filter(Boolean) : []);
+      if (!recipients.size || recipients.size > 64) continue;
+      const inner = assertMessage(delivery?.message, descriptor.sessionId);
+      if (!HOST_TYPES.has(inner.type) || inner.type === "DELIVERY_BATCH") throw new Error("Ungültiger Batch-Nachrichtentyp.");
+      inner.sender = { role: "host", id: descriptor.hostInstanceId };
+      for (const ws of this.sockets()) {
+        const a = wsAttachment(ws);
+        if (!a.authenticated || !a.selected || a.role === "host" || !recipients.has(a.participantId)) continue;
+        safeSend(ws, inner);
+      }
+    }
+  }
   async publishPresence() {
     const d = await this.descriptorValue(); if (!d) return;
     let players = 0, tv = 0; const online = new Set();
@@ -514,9 +548,15 @@ export class SessionRoom extends DurableObject {
       if (a.role === "tv") tv++;
     }
     const roster = (await this.ctx.storage.get("roster")) || {};
-    const playerList = Object.values(roster).filter(record => record.role === "player").map(record => ({ participantId: record.participantId, name: record.displayName, displayName: record.displayName, online: online.has(record.participantId) }));
-    const message = envelope("PRESENCE", d.sessionId, { players, tv, playerList }, { sender: { role: "server", id: "cloud" }, target: { role: "host", participantId: null } });
+    const playerList = Object.values(roster).filter(record => record.role === "player").map(record => ({ participantId: record.participantId, deviceId: record.deviceId || record.participantId, name: record.displayName, displayName: record.displayName, online: online.has(record.participantId) }));
+    const tvList = Object.values(roster).filter(record => record.role === "tv").map(record => ({ participantId: record.participantId, deviceId: record.deviceId || record.participantId, name: record.displayName, displayName: record.displayName, online: online.has(record.participantId) }));
+    const message = envelope("PRESENCE", d.sessionId, { players, tv, playerList, tvList }, { sender: { role: "server", id: "cloud" }, target: { role: "host", participantId: null } });
     for (const ws of this.sockets()) if (wsAttachment(ws).role === "host") safeSend(ws, message);
+    const publicPresence = envelope("PRESENCE", d.sessionId, { players: playerList, playerCount: players, tvCount: tv }, { sender: { role: "server", id: "cloud" }, target: { role: "player", participantId: null } });
+    for (const ws of this.sockets()) {
+      const a = wsAttachment(ws);
+      if (a.authenticated && a.selected && a.role === "player") safeSend(ws, publicPresence);
+    }
   }
   async webSocketClose(ws) {
     const attachment = wsAttachment(ws);

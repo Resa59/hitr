@@ -1,4 +1,4 @@
-# API-Vertrag 1.4.17
+# API-Vertrag 1.4.18-diagnose3
 
 ## Öffentliche Links
 
@@ -10,66 +10,60 @@
 
 - `POST /api/realtime/session/open`
 - `POST /api/realtime/session/update`
-- `POST /api/realtime/session/activity` – authentifiziertes, sparsames Host-Aktivitäts-Lease
+- `POST /api/realtime/session/activity`
 - `POST /api/realtime/session/kick`
 - `POST /api/realtime/session/end`
 - `GET /api/realtime/resolve?code=<CODE>&role=player|tv`
 - WebSocket `GET /api/realtime/ws?sid=<SESSION_ID>`
 
-## Zweiphasige Transportauswahl
+## Paralleler Cloud-/Lokalkanal
 
-Nach `HELLO` sendet der Server ein Bootstrap-`WELCOME`:
+Nach `HELLO` bestätigt Cloudflare den Teilnehmer und liefert aktuelle LAN-Kandidaten. Die Cloudverbindung bleibt offen. Der Browser kann zusätzlich einen lokalen WebSocket öffnen.
+
+Zustände:
+
+- `cloudConnected`
+- `localConnected`
+- `preferredDataPath`
+
+`127.0.0.1` wird normalen Spielern/TVs nicht angeboten. Lokale Verfügbarkeit und lokaler Verlust bleiben lokale Zustände und werden nicht als Cloudereignis übertragen.
+
+## LAN-Kandidaten
+
+Wenn sich die private Adresse des Haupthandys tatsächlich ändert, aktualisiert der Host die Session. Verbundene Teilnehmer erhalten `LOCAL_CANDIDATES`. Unveränderte Kandidaten erzeugen keine neue Aktualisierung.
+
+## Gebündelte Zustellung
+
+Der Host kann eine `DELIVERY_BATCH` senden:
 
 ```json
 {
-  "type": "WELCOME",
+  "type": "DELIVERY_BATCH",
   "payload": {
-    "transport": "cloud",
-    "bootstrapOnly": true,
-    "localCandidates": ["http://192.168.1.2:8765"],
-    "snapshot": null
+    "deliveries": [
+      { "recipients": ["player-b"], "message": { "type": "PLAYER_STATE", "payload": {} } },
+      { "recipients": ["tv-1"], "message": { "type": "TV_STATE", "payload": {} } }
+    ]
   }
 }
 ```
 
-Der Client prüft zuerst die lokalen Kandidaten und sendet danach:
+Das Durable Object verteilt die enthaltenen Nachrichten an die jeweiligen Empfänger. Ausgehende Zustellungen werden nicht als eigene Hosteingänge erzeugt.
 
-```json
-{
-  "type": "TRANSPORT_SELECTED",
-  "payload": { "transport": "local" }
-}
-```
+## Lokale kritische Spieleraktion
 
-oder
-
-```json
-{
-  "type": "TRANSPORT_SELECTED",
-  "payload": { "transport": "cloud" }
-}
-```
-
-Bei Cloud-Auswahl folgt `TRANSPORT_CONFIRMED`. Gleichzeitig erhält der Host genau für diesen Teilnehmer `CLIENT_READY` beziehungsweise `TV_READY` mit `needsSnapshot: true`. Der Host antwortet mit einem gezielten `PLAYER_SNAPSHOT` oder `TV_SNAPSHOT`.
-
-Vor der Auswahl werden Spieler und Fernseher weder als online gezählt noch mit Spielzuständen beliefert.
+- Nachricht besitzt `messageId`.
+- lokaler Server bestätigt mit `ACK` und `payload.replyTo`.
+- fehlt ACK oder bricht der lokale Socket ab, sendet der Browser dieselbe Nutzmeldung einmal über Cloud.
+- keine zusätzliche `LOCAL_FAILED`-Cloudnachricht.
 
 ## TV-Audio
 
-- TV sendet `TV_AUDIO_CAPABILITY`.
-- Host sendet `TV_AUDIO_TOKEN` nur an die konkrete TV-`participantId`.
-- `TV_AUDIO_TOKEN`, `PLAYER_STATE`, `PLAYER_SNAPSHOT`, `TV_STATE` und `TV_SNAPSHOT` werden nicht im Durable Object gespeichert.
+- TV → Host: `TV_AUDIO_CAPABILITY`
+- Host → konkretes TV: `TV_AUDIO_TOKEN`
+- Token und laufende Zustände werden nicht dauerhaft gespeichert.
+- kein regelmäßiger `TV_READY`-Heartbeat.
 
-## Ablauf und 15-Minuten-Lease
+## Inaktivität
 
-Der Host sendet bei neuer echter Aktivität höchstens alle fünf Minuten:
-
-```json
-{
-  "sessionId": "...",
-  "hostInviteToken": "...",
-  "activityAt": 0
-}
-```
-
-`SessionRoom` setzt den Alarm auf das früheste von 15 Minuten nach letzter Host-Aktivität, absolutem `expiresAt` oder dem Löschzeitpunkt nach ausdrücklichem Ende. Beim Ablauf werden Sockets geschlossen, der zugehörige Raumcode-Alias gelöscht und anschließend `deleteAll()` ausgeführt. Reine Keepalive-Nachrichten verlängern das Lease nicht.
+15 Minuten nach letzter echter Hostaktivität werden Session und Alias bereinigt. Technische ACK/PING/PONG verlängern die Sitzung nicht.

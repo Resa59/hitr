@@ -1,30 +1,34 @@
-# Hitster Cloudflare 1.4.17 – lokale Transportauswahl vor Spieldaten
+# Hitster Cloudflare 1.4.18-diagnose3 – paralleler Hybridtransport
 
-Dieser Stand enthält Worker, Durable Objects, Browser-Spieler und TV-Web-App für dauerhafte Räume, bevorzugte WLAN-Direktverbindungen und optionalen Spotify-TV-Ton.
+Dieser Stand enthält Worker, Durable Objects, Browser-Spieler und TV-Web-App für einen dauerhaft geöffneten Cloud-Kontrollkanal plus optionalen lokalen WLAN-Datenkanal.
 
 ## Verbindungsablauf
 
-1. Der Browser stellt zunächst nur die Cloud-Verbindung her und authentifiziert sich.
-2. `WELCOME` enthält ausschließlich Raum-/Teilnehmerdaten und lokale Kandidaten, aber keinen Spielsnapshot.
-3. Alle lokalen Kandidaten werden parallel geprüft.
-4. Der Browser meldet ausdrücklich `TRANSPORT_SELECTED: local|cloud`.
-5. Nur bei Cloud-Auswahl wird der Teilnehmer im Durable Object gespeichert und beim Haupthandy ein frischer, gezielter Snapshot angefordert.
-6. Laufende Spielzustände werden über Cloudflare nur transient weitergeleitet und nicht gespeichert.
+1. Spieler oder TV verbindet sich über die Cloudflare-HTTPS-Seite und authentifiziert sich.
+2. Cloud-WebSocket bleibt geöffnet.
+3. `WELCOME` liefert gegebenenfalls private LAN-Kandidaten des Haupthandys.
+4. Der Browser prüft diese Kandidaten direkt und öffnet bei Erfolg einen zweiten lokalen WebSocket.
+5. Die Seite bleibt auf Cloudflare; es gibt keinen Redirect auf eine lokale HTTP-Seite.
+6. Fällt lokal aus, bleiben Cloudverbindung und Seite bestehen.
+7. Später kann der lokale Kanal im Hintergrund erneut aufgebaut werden.
 
-## Cloudflare-Sparmaßnahmen
+## Ressourcenregeln
 
-- kein Snapshot-Speicher im Durable Object,
-- keine Teilnehmer-/Roster-Schreiboperation bei reinem Bootstrap und erfolgreichem WLAN-Wechsel,
-- keine erneute Speicherung unveränderter lokaler Kandidaten oder Aliasdaten,
-- keine Präsenzberechnung beim Schließen eines noch nicht ausgewählten Bootstrap-Sockets,
-- 15-Minuten-Aktivitäts-Lease mit automatischer Session- und Raumcode-Alias-Bereinigung,
-- Aktivitätsmeldung nur bei neuer Aktivität und höchstens alle fünf Minuten,
-- hibernierbare WebSockets statt Polling.
+- kein Viersekunden-`TV_READY`-Heartbeat,
+- keine Cloudmeldung für jeden lokalen Probe oder Kanalverlust,
+- unveränderte LAN-Kandidaten werden nicht erneut verteilt,
+- ein Hostereignis wird für alle nicht lokal versorgten Empfänger in einer `DELIVERY_BATCH` gebündelt,
+- lokal bereits versorgte Empfänger werden ausgeschlossen,
+- hibernierbare WebSockets statt Polling,
+- keine dauerhafte Speicherung laufender Spielsnapshots,
+- 15-Minuten-Inaktivitätsbereinigung bleibt aktiv.
 
-Spotify-Tokens bleiben zielgerichtet, kurzlebig und vollständig transient. Bei aktivem Spotify-TV-Audio bleibt der Fernseher wegen des erforderlichen sicheren Browserkontexts auf HTTPS/Cloud.
+## Spotify-TV-Audio
 
-Siehe `docs/DEPLOYMENT.md`, `docs/API.md` und `docs/SPOTIFY_GERAET_ZIELBILD.md`.
+Der vorhandene unsichtbare Spotify-TV-Webplayer bleibt erhalten. Der Audiostream läuft direkt zwischen Spotify und Fernseher; Cloudflare überträgt nur notwendige Steuer- und Tokennachrichten.
 
-## Kompatibilität mit dem bestehenden Worker `hitr`
+## Kompatibilität
 
-Der veröffentlichte Worker besitzt zusätzlich den Durable-Object-Namespace `UsageGuard` aus Migration `v2`. Der aktuelle Spielablauf verwendet ihn nicht aktiv, aber `src/worker.js` exportiert die Klasse weiterhin und `wrangler.jsonc` enthält die Bindung `GUARD`. Diese Einträge dürfen ohne ausdrückliche `delete_class`- oder `rename_class`-Migration nicht entfernt werden.
+`UsageGuard`, die Bindung `GUARD` und Migration `v2` dürfen nicht entfernt werden.
+
+Siehe `docs/API.md`, `docs/DEPLOYMENT.md` und `docs/SPOTIFY_GERAET_ZIELBILD.md`.

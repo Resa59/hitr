@@ -58,3 +58,12 @@ main{min-width:0;min-height:0;display:flex;padding:clamp(9px,1.45vh,20px) var(--
 @media(max-width:940px){.tv-audio-button{max-width:140px}.top-actions{flex-wrap:wrap}.fullscreen{min-height:38px}}
 
 .transport-diagnostics-panel{margin-top:14px}.transport-diagnostics-panel summary{cursor:pointer;color:#ffd36d;font-weight:850}.transport-diagnostics-panel pre{max-height:260px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;padding:12px;border:1px solid var(--line);border-radius:12px;background:#0b0813;color:#d8d0e8;font:12px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace}.transport-diagnostics-panel button{margin-top:10px}
+
+/* 1.4.18 Diagnose: sichtbarer lokaler Retry und TV-Warteraum. */
+#retryLocal{border-color:#8f63ff;background:#241b3b;color:#e6dbff}
+.lobby-join{width:min(1180px,100%);margin:auto;display:grid;grid-template-columns:minmax(180px,.72fr) minmax(180px,.55fr) minmax(260px,1.15fr);align-items:center;gap:clamp(18px,3vw,42px)}
+.lobby-code,.lobby-player-panel{padding:clamp(16px,2.2vh,26px);border:1px solid var(--line);border-radius:20px;background:#130e20}
+.lobby-code{text-align:center}.lobby-code b{display:block;margin:.15em 0;color:var(--gold);font-size:clamp(2.7rem,min(7vw,9vh),6rem);line-height:1;letter-spacing:.08em;white-space:nowrap}.lobby-code>span:last-child{color:var(--muted);font-weight:800}
+.lobby-qr{display:grid;place-items:center;min-height:190px;padding:12px;border-radius:20px;background:#fff}.lobby-qr img,.lobby-qr canvas{display:block;max-width:100%;height:auto}
+.lobby-players{display:grid;gap:8px;margin-top:12px;max-height:min(34vh,300px);overflow:auto}.lobby-player{padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:#1d152b;font-weight:850}.lobby-player.host{color:var(--gold)}.lobby-players p{margin:0;color:var(--muted)}
+@media(max-width:850px),(max-aspect-ratio:4/3){.lobby-join{grid-template-columns:1fr}.lobby-qr{width:min(260px,100%);margin:auto}.lobby-player-panel{width:100%}}

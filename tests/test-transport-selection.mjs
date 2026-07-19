@@ -67,8 +67,10 @@ assert.equal(host.sent.some(m=>m.type==='CLIENT_READY'),false,'host must not rec
 const selection={payload:{transport:'cloud',resumed:false}};
 await room.selectTransport(player,selection,descriptor,player.attachment);
 assert.equal(player.attachment.selected,true);
-assert.equal(player.sent.at(-1).type,'TRANSPORT_CONFIRMED');
-assert.equal(player.sent.at(-1).payload.transport,'cloud');
+const confirmed=player.sent.find(m=>m.type==='TRANSPORT_CONFIRMED');
+assert(confirmed,'Transportbestätigung fehlt');
+assert.equal(confirmed.payload.transport,'cloud');
+assert(player.sent.some(m=>m.type==='PRESENCE'),'Browser erhält vollständige Warteraumliste');
 assert.equal(host.sent.some(m=>m.type==='CLIENT_READY'&&m.payload.needsSnapshot===true),true);
 assert.equal(storage.map.get('roster')[player.attachment.participantId].displayName,'Resa');
 assert.equal(storage.map.has(`participant:${player.attachment.participantId}`),true,'cloud selection persists resume record');
