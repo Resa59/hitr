@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 
 const VERSION = 1;
-const BUILD = "1.4.18-diagnose3";
+const BUILD = "1.4.18-diagnose4";
 const CAPABILITIES = ["transport-selection-v1", "hybrid-data-channel-v1", "delivery-batch-v1", "tv-pair-v1", "host-activity-timeout-v1"];
 const MAX_BYTES = 32 * 1024;
 const SESSION_INACTIVITY_MS = 15 * 60 * 1000;
@@ -369,7 +369,7 @@ export class SessionRoom extends DurableObject {
       deviceId = deviceId || participantId;
       record = { participantId, resumeToken, role, displayName: "Haupthandy", deviceId };
     } else {
-      const storedRecord = participantId ? await this.ctx.storage.get(`participant:${participantId}`) : null;
+      let storedRecord = participantId ? await this.ctx.storage.get(`participant:${participantId}`) : null;
       participantPersisted = !!storedRecord && storedRecord.role === role && !!resumeToken && storedRecord.resumeToken === resumeToken;
       if (participantPersisted) {
         record = { ...storedRecord };
@@ -540,13 +540,14 @@ export class SessionRoom extends DurableObject {
   }
   async publishPresence() {
     const d = await this.descriptorValue(); if (!d) return;
-    let players = 0, tv = 0; const online = new Set();
+    const online = new Set(), onlinePlayers = new Set(), onlineTv = new Set();
     for (const ws of this.sockets()) {
       const a = wsAttachment(ws); if (!a.authenticated || !a.selected) continue;
       online.add(a.participantId);
-      if (a.role === "player") players++;
-      if (a.role === "tv") tv++;
+      if (a.role === "player") onlinePlayers.add(a.participantId);
+      if (a.role === "tv") onlineTv.add(a.participantId);
     }
+    const players = onlinePlayers.size, tv = onlineTv.size;
     const roster = (await this.ctx.storage.get("roster")) || {};
     const playerList = Object.values(roster).filter(record => record.role === "player").map(record => ({ participantId: record.participantId, deviceId: record.deviceId || record.participantId, name: record.displayName, displayName: record.displayName, online: online.has(record.participantId) }));
     const tvList = Object.values(roster).filter(record => record.role === "tv").map(record => ({ participantId: record.participantId, deviceId: record.deviceId || record.participantId, name: record.displayName, displayName: record.displayName, online: online.has(record.participantId) }));
