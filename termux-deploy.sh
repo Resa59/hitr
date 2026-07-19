@@ -1,7 +1,7 @@
 #!/data/data/com.termux/files/usr/bin/bash
 set -Eeuo pipefail
 
-EXPECTED_BUILD="1.4.18-diagnose4"
+EXPECTED_BUILD="1.4.18-diagnose5"
 HEALTH_URL="https://hitr.rdoe.workers.dev/api/health"
 REPO="${HOME}/hitr"
 PACKAGE_ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -39,7 +39,7 @@ node --check "$PACKAGE_ROOT/src/worker.js"
 if [[ -d "$PACKAGE_ROOT/tests" ]]; then
   while IFS= read -r -d '' test_file; do
     echo "  Test: $(basename "$test_file")"
-    (cd "$PACKAGE_ROOT" && timeout 25s node "$test_file")
+    timeout 25s node "$test_file"
   done < <(find "$PACKAGE_ROOT/tests" -maxdepth 1 -type f \( -name '*.mjs' -o -name '*.js' \) -print0 | sort -z)
 fi
 

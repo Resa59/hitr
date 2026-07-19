@@ -75,6 +75,7 @@
       this.connecting = new Set();
       this.handshakeTimers = { cloud: null, local: null };
       this.localProbeTimer = null;
+      this.localProbeFailures = 0;
       this.cloudReconnectTimer = null;
       this.cloudReconnectAttempt = 0;
       this.pendingLocal = new Map();
@@ -125,7 +126,10 @@
       const before = JSON.stringify(this.usableCandidates());
       this.descriptor.localCandidates = next;
       this.diagnostic("local_candidates_updated", { source, candidates: next, changed: before !== JSON.stringify(next) });
-      if (before !== JSON.stringify(next) && this.cloudConfirmed && !this.localConfirmed) this.scheduleLocalProbe(80);
+      if (before !== JSON.stringify(next)) {
+        this.localProbeFailures = 0;
+        if (this.cloudConfirmed && !this.localConfirmed) this.scheduleLocalProbe(80);
+      }
       return next;
     }
 
@@ -236,6 +240,7 @@
         this.preferredDataPath = "local";
         this.updateActive();
         this.cloudReconnectAttempt = 0;
+        this.localProbeFailures = 0;
         this.onTransport?.("local", "welcome", this.state());
         return;
       }
@@ -263,10 +268,12 @@
       this.active = this.preferredDataPath === "local" ? "local" : (this.links.cloud?.open ? "cloud" : null);
     }
 
-    scheduleLocalProbe(delay = 30000) {
+    scheduleLocalProbe(delay = null) {
       clearTimeout(this.localProbeTimer);
       if (this.userClosed || !this.cloudConfirmed || this.localConfirmed || !this.usableCandidates().length) return;
-      this.localProbeTimer = setTimeout(() => this.probeLocal(false).catch(error => this.onError?.(error)), Math.max(0, delay));
+      const backoff = [30000, 60000, 120000, 300000, 600000];
+      const resolvedDelay = delay == null ? backoff[Math.min(Math.max(0, this.localProbeFailures - 1), backoff.length - 1)] : Number(delay);
+      this.localProbeTimer = setTimeout(() => this.probeLocal(false).catch(error => this.onError?.(error)), Math.max(0, resolvedDelay));
     }
 
     async probeCandidate(candidate, timeoutMs = 2400) {
@@ -322,10 +329,11 @@
           this.diagnostic("local_socket_open_failed", { candidate, error: error?.message || String(error) });
         }
       }
-      this.diagnostic("local_probe_batch_failed", { initial: !!initial, candidates });
+      this.localProbeFailures += 1;
+      this.diagnostic("local_probe_batch_failed", { initial: !!initial, candidates, retryLevel: this.localProbeFailures });
       this.onTransport?.("cloud", "local-unavailable", this.state());
       this.onLocalUnavailable?.({ candidates, manual: false });
-      this.scheduleLocalProbe(30000);
+      this.scheduleLocalProbe();
       return false;
     }
 
@@ -397,6 +405,7 @@
         this.fallbackAllPending("local-socket-closed");
         this.updateActive();
         this.onTransport?.("cloud", "fallback", this.state());
+        this.localProbeFailures = 0;
         this.scheduleLocalProbe(5000);
         return;
       }

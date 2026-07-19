@@ -1,34 +1,41 @@
-# Hitster Cloudflare 1.4.18-diagnose3 – paralleler Hybridtransport
+# Hitster Cloudflare 1.4.18-diagnose5 – Hybridtransport
 
-Dieser Stand enthält Worker, Durable Objects, Browser-Spieler und TV-Web-App für einen dauerhaft geöffneten Cloud-Kontrollkanal plus optionalen lokalen WLAN-Datenkanal.
+Dieses Paket enthält Worker, Durable Objects, Browser-Spieler und TV-Web-App für einen dauerhaft verfügbaren Cloud-Kontrollkanal plus optionalen lokalen WLAN-/Hotspot-Datenkanal.
 
 ## Verbindungsablauf
 
-1. Spieler oder TV verbindet sich über die Cloudflare-HTTPS-Seite und authentifiziert sich.
-2. Cloud-WebSocket bleibt geöffnet.
+1. Spieler oder TV verbindet sich über die Cloudflare-HTTPS-Seite.
+2. Der Cloud-WebSocket bleibt als Kontroll- und Rückfallkanal geöffnet.
 3. `WELCOME` liefert gegebenenfalls private LAN-Kandidaten des Haupthandys.
-4. Der Browser prüft diese Kandidaten direkt und öffnet bei Erfolg einen zweiten lokalen WebSocket.
-5. Die Seite bleibt auf Cloudflare; es gibt keinen Redirect auf eine lokale HTTP-Seite.
-6. Fällt lokal aus, bleiben Cloudverbindung und Seite bestehen.
-7. Später kann der lokale Kanal im Hintergrund erneut aufgebaut werden.
+4. Der Browser prüft diese automatisch und öffnet bei Erfolg einen zweiten lokalen WebSocket.
+5. Die Seite bleibt auf Cloudflare; es gibt keinen Redirect.
+6. Fällt lokal aus oder blockiert das WLAN direkte Gerätekommunikation, läuft der Datenweg über Cloud.
+7. Lokale Wiederholungsversuche werden mit zunehmenden Abständen ausgeführt.
 
 ## Ressourcenregeln
 
-- kein Viersekunden-`TV_READY`-Heartbeat,
-- keine Cloudmeldung für jeden lokalen Probe oder Kanalverlust,
-- unveränderte LAN-Kandidaten werden nicht erneut verteilt,
-- ein Hostereignis wird für alle nicht lokal versorgten Empfänger in einer `DELIVERY_BATCH` gebündelt,
-- lokal bereits versorgte Empfänger werden ausgeschlossen,
-- hibernierbare WebSockets statt Polling,
-- keine dauerhafte Speicherung laufender Spielsnapshots,
-- 15-Minuten-Inaktivitätsbereinigung bleibt aktiv.
+- keine Cloudmeldung für jeden lokalen Probeversuch oder Kanalverlust,
+- Kandidaten nur bei echter Änderung aktualisieren,
+- ein Hostereignis für nicht lokal versorgte Ziele in einer `DELIVERY_BATCH` bündeln,
+- keine regelmäßigen App-Heartbeats,
+- hibernierbare WebSockets,
+- 15-Minuten-Inaktivitätsbereinigung,
+- Diagnoseprotokolle lokal, begrenzt und nach Bestätigung zurückbauen.
 
-## Spotify-TV-Audio
+## Spotify
 
-Der vorhandene unsichtbare Spotify-TV-Webplayer bleibt erhalten. Der Audiostream läuft direkt zwischen Spotify und Fernseher; Cloudflare überträgt nur notwendige Steuer- und Tokennachrichten.
+TV-Spotify-Audio bleibt unverändert. Der experimentelle Spotify-Handyplayer befindet sich ausschließlich in der Android-App und verursacht keine zusätzliche Cloudflare-Kommunikation.
+
+## Deployment
+
+Nach einmaliger Einrichtung genügt in Termux:
+
+```bash
+hitster-deploy
+```
+
+Das Paket enthält `termux-deploy.sh`, führt alle paketinternen Tests aus, aktualisiert `Resa59/hitr` und prüft anschließend den Health-Build `1.4.18-diagnose5`.
 
 ## Kompatibilität
 
 `UsageGuard`, die Bindung `GUARD` und Migration `v2` dürfen nicht entfernt werden.
-
-Siehe `docs/API.md`, `docs/DEPLOYMENT.md` und `docs/SPOTIFY_GERAET_ZIELBILD.md`.

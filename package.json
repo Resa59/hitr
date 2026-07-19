@@ -1,9 +1,9 @@
 {
   "name": "hitster-cloud-first-realtime",
   "private": true,
-  "version": "1.4.18-diagnose4",
+  "version": "1.4.18-diagnose5",
   "scripts": {
-    "check": "node --check src/worker.js && node tests/test-contract.mjs && node tests/test-transport-selection.mjs && node tests/test-inactivity-lifecycle.mjs && node tests/test-pair-flow.mjs && node tests/test-local-handoff-descriptor.mjs && node tests/test-connection-fixes.mjs && node tests/test-diagnose4-regressions.mjs",
+    "check": "node --check src/worker.js && node tests/test-contract.mjs && node tests/test-transport-selection.mjs && node tests/test-inactivity-lifecycle.mjs && node tests/test-pair-flow.mjs && node tests/test-local-handoff-descriptor.mjs && node tests/test-connection-fixes.mjs && node tests/test-diagnose4-regressions.mjs && node tests/test-diagnose5-regressions.mjs",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy"
   },
