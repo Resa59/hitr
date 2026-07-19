@@ -62,8 +62,6 @@
       this.onTransport = null;
       this.onCloudSelected = null;
       this.onBeforeLocalSwitch = null;
-      this.onLocalUnavailable = null;
-      this.canSwitchLocal = typeof options.canSwitchLocal === "function" ? options.canSwitchLocal : (() => true);
       this.userClosed = false;
       this.probeTimer = null;
       this.handshakeTimer = null;
@@ -71,7 +69,26 @@
       this.connecting = new Set();
       this.selectionPending = false;
       this.cloudConfirmed = false;
+      this.onDiagnostic = null;
+      this.diagnosticHistory = [];
     }
+
+    diagnostic(stage, detail = {}) {
+      const entry = {
+        time: Date.now(),
+        stage: String(stage || "unknown"),
+        role: this.role,
+        active: this.active || "",
+        pageOrigin: location.origin,
+        ...detail
+      };
+      this.diagnosticHistory.push(entry);
+      if (this.diagnosticHistory.length > 80) this.diagnosticHistory.splice(0, this.diagnosticHistory.length - 80);
+      try { this.onDiagnostic?.(entry); } catch (_) { }
+      return entry;
+    }
+
+    getDiagnostics() { return this.diagnosticHistory.map(entry => ({ ...entry })); }
 
     cloudWsUrl() {
       const base = String(this.descriptor.cloudBaseUrl || location.origin).replace(/\/$/, "");
@@ -92,31 +109,13 @@
         return host === "127.0.0.1" || host === "localhost" || host === "::1" || host === "[::1]";
       } catch (_) { return false; }
     }
-    orderedCandidates() {
-      const values = [...new Set((this.descriptor.localCandidates || []).map(String).filter(Boolean))].slice(0, 8);
-      const pageIsLoopback = this.isLoopbackBase(location.origin);
-      return values.sort((a, b) => {
-        const al = this.isLoopbackBase(a), bl = this.isLoopbackBase(b);
-        if (al === bl) return 0;
-        // Auf einer Cloud-Seite zuerst die LAN-Adresse prüfen. Auf einer bereits
-        // lokalen Seite bleibt Loopback der bevorzugte Same-Device-Weg.
-        return pageIsLoopback ? (al ? -1 : 1) : (al ? 1 : -1);
-      });
-    }
-    directTarget(base) {
-      const root = String(base || "").replace(/\/$/, "");
-      return root ? `${root}${this.localPath}` : "";
-    }
-    localSwitchAllowed() {
-      try { return this.canSwitchLocal?.() !== false; }
-      catch (_) { return false; }
-    }
     async tryInitialLoopbackHandoff() {
-      if (!this.localSwitchAllowed()) return false;
       const loopback = (this.descriptor.localCandidates || []).find(base => this.isLoopbackBase(base));
       if (!loopback || this.currentLocalBase()) return false;
+      this.diagnostic("loopback_probe_requested", { candidate: String(loopback) });
       const target = await this.probeCandidate(loopback, 750);
       if (!target || this.userClosed) return false;
+      this.diagnostic("loopback_target_found", { target: String(target) });
       this.onTransport?.("local", "switching");
       try { this.navigateToLocalTarget(target, false); }
       catch (error) { this.onError?.(error); return false; }
@@ -129,21 +128,30 @@
     async connect() {
       this.userClosed = false;
       this.cloudConfirmed = false;
+      this.diagnostic("connect_start", {
+        protocol: location.protocol,
+        candidates: [...new Set((this.descriptor.localCandidates || []).map(String).filter(Boolean))].slice(0, 8),
+        hasSession: !!this.descriptor.sessionId,
+        hasInvite: !!this.descriptor.inviteToken
+      });
       const localBase = this.currentLocalBase();
       if (localBase) {
+        this.diagnostic("already_on_local_origin", { localBase });
         try { await this.openLink("local", this.localWsUrl(localBase)); return; }
-        catch (error) { this.onError?.(error); }
+        catch (error) { this.diagnostic("local_socket_open_failed", { error: error?.message || String(error) }); this.onError?.(error); }
       }
       await this.tryInitialLoopbackHandoff();
       if (this.userClosed) return;
       // Die Cloud-Verbindung authentifiziert und vermittelt zunächst nur.
       // Spielzustände werden erst nach der Transportauswahl freigegeben.
+      this.diagnostic("cloud_socket_requested", { cloudOrigin: String(this.descriptor.cloudBaseUrl || location.origin).replace(/\/$/, "") });
       await this.openLink("cloud", this.cloudWsUrl());
     }
 
     async openLink(name, url) {
       if (this.connecting.has(name) || this.links[name]?.open) return;
       this.connecting.add(name);
+      this.diagnostic("socket_open_start", { transport: name });
       try {
         const link = new SocketLink(url, name, this.connectTimeoutMs);
         this.links[name] = link;
@@ -152,6 +160,7 @@
         link.onClose = (info, transport) => this.linkClosed(transport, info);
         await link.connect();
         this.active = name;
+        this.diagnostic("socket_open", { transport: name });
         this.armHandshakeTimeout(name, "Der Server hat die Verbindung nicht bestätigt.");
         this.onTransport?.(name, "socket-open");
         this.onOpen?.(name);
@@ -165,6 +174,7 @@
       this.handshakeTimer = setTimeout(() => {
         if (this.userClosed) return;
         const error = new Error(detail || "Verbindungsbestätigung hat zu lange gedauert.");
+        this.diagnostic("handshake_timeout", { transport: name, error: error.message });
         this.onError?.(error);
         try { this.links[name]?.close(4008, "handshake-timeout"); } catch (_) { }
       }, name === "local" ? 4500 : 18000);
@@ -180,6 +190,7 @@
       if (Array.isArray(payload.localCandidates) && payload.localCandidates.length) {
         this.descriptor.localCandidates = payload.localCandidates;
       }
+      this.diagnostic("welcome", { transport: name, candidates: [...new Set((this.descriptor.localCandidates || []).map(String).filter(Boolean))].slice(0, 8) });
       if (name === "local") {
         this.clearHandshakeTimeout();
         this.cloudConfirmed = false;
@@ -207,6 +218,7 @@
       this.localHandoffTimer = null;
       this.active = "cloud";
       this.cloudConfirmed = true;
+      this.diagnostic("transport_confirmed", { transport: "cloud" });
       this.onTransport?.("cloud", "welcome");
       this.scheduleLocalProbe(30000);
     }
@@ -214,6 +226,7 @@
     async selectCloud() {
       if (this.userClosed || !this.links.cloud?.open) return false;
       this.onTransport?.("cloud", "selecting");
+      this.diagnostic("cloud_fallback_selected", { reason: "local_unavailable_or_blocked" });
       await Promise.resolve(this.onCloudSelected?.());
       return true;
     }
@@ -224,57 +237,38 @@
       this.probeTimer = setTimeout(() => this.probeLocal(false).catch(() => { }), delay);
     }
 
-    async probeCandidate(candidate, timeoutMs = 2400) {
+    async probeCandidate(candidate, timeoutMs = 1800) {
       const base = String(candidate).replace(/\/$/, "");
-      const endpoint = `${base}/api/realtime/bootstrap?sid=${encodeURIComponent(this.descriptor.sessionId)}&t=${Date.now()}`;
-      const addressSpace = this.isLoopbackBase(base) ? "loopback" : "local";
-      // Kiwi/Chromium-Versionen unterscheiden sich bei Local Network Access.
-      // Zuerst wird die aktuelle API verwendet, danach ein kompatibler Abruf ohne
-      // die experimentelle Option. Private IP-Literale können dabei selbst den
-      // Browser-Berechtigungsdialog auslösen.
-      for (const includeAddressSpace of [true, false]) {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), timeoutMs);
-        try {
-          const options = { cache: "no-store", mode: "cors", credentials: "omit", redirect: "error", signal: controller.signal };
-          if (includeAddressSpace) options.targetAddressSpace = addressSpace;
-          const response = await fetch(endpoint, options);
-          if (!response.ok) continue;
-          const data = await response.json();
-          const target = this.role === "tv" ? data.tvUrl : data.clientUrl;
-          if (target) return String(target);
-        } catch (_) {
-          // Der zweite Durchlauf deckt Browser ohne targetAddressSpace ab.
-        } finally { clearTimeout(timer); }
+      const started = Date.now();
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      this.diagnostic("local_probe_start", { candidate: base, timeoutMs });
+      try {
+        const requestOptions = { cache: "no-store", mode: "cors", signal: controller.signal };
+        try { requestOptions.targetAddressSpace = "local"; } catch (_) { }
+        const response = await fetch(`${base}/api/realtime/bootstrap?sid=${encodeURIComponent(this.descriptor.sessionId)}`, requestOptions);
+        if (!response.ok) {
+          let serverError = "";
+          try { serverError = String((await response.json())?.error || ""); } catch (_) { }
+          this.diagnostic("local_probe_http_rejected", { candidate: base, status: response.status, serverError, durationMs: Date.now() - started });
+          return null;
+        }
+        const data = await response.json();
+        const target = this.role === "tv" ? data.tvUrl : data.clientUrl;
+        this.diagnostic("local_probe_success", { candidate: base, target: target ? String(target) : "", durationMs: Date.now() - started });
+        return target ? String(target) : null;
+      } catch (error) {
+        this.diagnostic("local_probe_failed", {
+          candidate: base,
+          errorName: error?.name || "Error",
+          error: error?.message || String(error),
+          durationMs: Date.now() - started,
+          pageProtocol: location.protocol
+        });
+        return null;
+      } finally {
+        clearTimeout(timer);
       }
-      return null;
-    }
-
-    async retryLocal() {
-      if (this.userClosed || this.active === "local") return true;
-      if (!this.localSwitchAllowed()) throw new Error("Diese Funktion benötigt derzeit die sichere Cloud-Verbindung.");
-      const candidates = this.orderedCandidates();
-      if (!candidates.length) throw new Error("Das Haupthandy hat keine lokale Adresse gemeldet.");
-      this.onTransport?.("local", "probing");
-      for (const candidate of candidates) {
-        const target = await this.probeCandidate(candidate, 4200);
-        if (!target) continue;
-        this.onTransport?.("local", "switching");
-        this.navigateToLocalTarget(target, true);
-        return true;
-      }
-      this.onLocalUnavailable?.({ candidates, manual: true });
-      // Ein aktiver Nutzerklick darf als letzter Versuch direkt zur privaten
-      // Adresse navigieren. Manche Chromium-/TV-Browser blockieren den
-      // vorgelagerten HTTPS→HTTP-fetch, erlauben aber die eigentliche
-      // Top-Level-Navigation ins lokale Netz.
-      const direct = this.directTarget(candidates[0]);
-      if (direct) {
-        this.onTransport?.("local", "switching");
-        this.navigateToLocalTarget(direct, true);
-        return true;
-      }
-      throw new Error("Der lokale Server ist aus diesem Browser nicht erreichbar. Prüfe die Berechtigung für den Zugriff auf das lokale Netzwerk oder verwende weiter die Cloud-Verbindung.");
     }
 
     navigateToLocalTarget(target, includeHandoff = true) {
@@ -310,41 +304,35 @@
       }
       params.set("via", "local");
       url.hash = params.toString();
+      this.diagnostic("local_navigation", { targetOrigin: url.origin, targetPath: url.pathname, handoff: !!includeHandoff });
       location.replace(url.toString());
     }
 
     async probeLocal(initial = false) {
       if (this.userClosed || this.active === "local") return true;
-      if (!this.localSwitchAllowed()) {
-        this.onTransport?.("cloud", "secure-audio");
-        if (initial) await this.selectCloud();
-        return false;
-      }
       if (typeof global.HitsterRealtimeCanSwitchLocal === "function" && global.HitsterRealtimeCanSwitchLocal() === false) {
         this.onTransport?.("cloud", "secure-audio");
         if (initial) await this.selectCloud();
         else this.scheduleLocalProbe(30000);
         return false;
       }
-      const candidates = this.orderedCandidates();
+      const candidates = [...new Set((this.descriptor.localCandidates || []).map(String).filter(Boolean))].slice(0, 8);
       if (!candidates.length) {
-        this.onLocalUnavailable?.({ candidates: [], manual: false });
+        this.diagnostic("local_probe_skipped", { reason: "no_candidates", initial: !!initial });
         if (initial) await this.selectCloud();
         return false;
       }
       this.onTransport?.("local", "probing");
-      let target = null;
-      for (const candidate of candidates) {
-        target = await this.probeCandidate(candidate);
-        if (target) break;
-      }
+      this.diagnostic("local_probe_batch", { initial: !!initial, candidates });
+      const results = await Promise.all(candidates.map(candidate => this.probeCandidate(candidate)));
+      const target = results.find(Boolean);
       if (!target) {
-        this.onTransport?.("cloud", "local-unavailable");
-        this.onLocalUnavailable?.({ candidates, manual: false });
+        this.diagnostic("local_probe_batch_failed", { initial: !!initial, candidates });
         if (initial) await this.selectCloud();
         else this.scheduleLocalProbe(30000);
         return false;
       }
+      this.diagnostic("local_probe_batch_success", { target: String(target), initial: !!initial });
       this.onTransport?.("local", "switching");
       // Cloud bleibt bis zum tatsächlich geladenen lokalen Ziel unangetastet.
       // Falls Android/der Browser die private HTTP-Navigation blockiert, wählt
@@ -373,23 +361,12 @@
       this.active = null;
       this.cloudConfirmed = false;
       this.clearHandshakeTimeout();
-
-      // Fällt ein lokaler Direktweg weg (WLAN verlassen, Netzwechsel oder
-      // Android-Server kurz nicht erreichbar), bleibt derselbe Browser-Client
-      // erhalten und verbindet sich sofort über die Cloud neu. Der äußere
-      // Reconnect-Mechanismus wird erst bemüht, wenn auch dieser Fallback
-      // scheitert; dadurch entstehen weder doppelte Transportinstanzen noch
-      // verlorene Teilnehmerzustände.
+      this.diagnostic("socket_closed", { transport: name, code: Number(info?.code || 0), reason: String(info?.reason || ""), clean: !!info?.clean });
+      this.onClose?.({ ...info, transport: name, user: false });
       if (name === "local") {
-        this.onTransport?.("cloud", "fallback");
-        try {
-          await this.openLink("cloud", this.cloudWsUrl());
-          return;
-        } catch (error) {
-          this.onError?.(error);
-        }
+        try { await this.openLink("cloud", this.cloudWsUrl()); }
+        catch (error) { this.onError?.(error); }
       }
-      this.onClose?.({ ...info, transport: name, user: false, fallbackFailed: name === "local" });
     }
 
     send(value) {
@@ -399,6 +376,7 @@
     }
 
     async close(code = 1000, reason = "client closed") {
+      this.diagnostic("transport_close", { code, reason });
       this.userClosed = true;
       this.cloudConfirmed = false;
       clearTimeout(this.probeTimer);

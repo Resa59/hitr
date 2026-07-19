@@ -8,7 +8,7 @@ Der Bootstrap-Socket ist noch nicht als aktiver Empfänger ausgewählt. Deshalb 
 
 ## Lokale Auswahl
 
-Nach dem Bootstrap prüft die Web-App die lokalen Kandidaten geordnet und mit kurzen Zeitgrenzen. Auf Cloud-Seiten wird die LAN-Adresse vor Loopback geprüft; auf bereits lokalen Seiten bleibt Loopback bevorzugt. Ein erfolgreicher lokaler Bootstrap liefert die lokale Spieler- oder TV-Adresse. Vor dem Seitenwechsel meldet der Client `TRANSPORT_SELECTED { transport: "local" }`.
+Nach dem Bootstrap prüft die Web-App alle lokalen Kandidaten parallel. Ein erfolgreicher lokaler Bootstrap liefert die lokale Spieler- oder TV-Adresse. Vor dem Seitenwechsel meldet der Client `TRANSPORT_SELECTED { transport: "local" }`.
 
 Die lokale Seite übernimmt Teilnehmerkennung, Resume-Token und letzte Sequenz. Der lokale Server liefert den aktuellen Snapshot direkt in seinem `WELCOME`.
 

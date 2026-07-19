@@ -1,4 +1,4 @@
-# Veröffentlichung auf Cloudflare – Stand 1.4.18
+# Veröffentlichung auf Cloudflare – Stand 1.4.17
 
 ## Vollständiger Quellweg
 
@@ -14,14 +14,14 @@
    - `/tv/`
    - `/tv/sw.js`
    - `/.well-known/assetlinks.json`
-7. TV-Seite vollständig neu laden. Der Service-Worker-Cache trägt die Version `hitster-tv-v1.4.18`.
+7. TV-Seite vollständig neu laden. Der Service-Worker-Cache trägt die Version `hitster-tv-v1.4.17`.
 
 ## Wesentlicher Abnahmetest
 
 1. Raum auf dem Haupthandy öffnen.
 2. Mit einem Gerät im selben WLAN beitreten.
 3. Im Cloudflare-Log darf vor der Transportauswahl kein Spielsnapshot erscheinen.
-4. Der Browser prüft den lokalen Bootstrap geordnet mit kurzen Zeitgrenzen und wechselt anschließend auf die erreichbare lokale URL.
+4. Der Browser muss den lokalen Bootstrap parallel prüfen und anschließend auf die lokale URL wechseln.
 5. Bei ausgeschaltetem WLAN muss stattdessen `TRANSPORT_SELECTED: cloud` folgen und ein frischer gezielter Snapshot eintreffen.
 6. Bei später wieder verfügbarem WLAN muss der Client von Cloud auf lokal wechseln und in Cloud nicht mehr als aktiver Empfänger gezählt werden.
 7. Nach 15 Minuten ohne echte Host-Aktivität muss Cloudflare `SESSION_ENDED` senden und Sitzung sowie Alias entfernen.
@@ -67,14 +67,3 @@ export class UsageGuard extends DurableObject { /* Kompatibilitätsimplementieru
 ```
 
 `UsageGuard` wird vom aktuellen Spielablauf nicht aktiv aufgerufen. Die Klasse muss dennoch exportiert bleiben, weil bereits Durable Objects von diesem veröffentlichten Klassennamen abhängen. Ein Entfernen oder Umbenennen ist nur mit einer ausdrücklich geplanten Cloudflare-Migration zulässig.
-
-
-## Termux-/GitHub-Actions-Weg ab 1.4.18
-
-Nach dem Herunterladen des vollständigen Cloudflare-Pakets genügt auf dem bereits eingerichteten Android-Gerät:
-
-```bash
-hitster-cloudflare-push
-```
-
-Das Skript übernimmt das neueste Cloudflare-Paket in `Resa59/hitr` und pusht `main`. Der enthaltene Workflow `.github/workflows/deploy-cloudflare.yml` führt anschließend `wrangler deploy` mit den verschlüsselten GitHub-Secrets aus. Der Workflow darf bei künftigen Paket-Synchronisierungen nicht fehlen, weil `rsync --delete` sonst eine nur auf GitHub vorhandene Workflow-Datei entfernen würde.

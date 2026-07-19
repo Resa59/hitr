@@ -1,4 +1,4 @@
-# Hitster Cloudflare 1.4.18 – Verbindungs-, Präsenz- und TV-Pairing-Fix
+# Hitster Cloudflare 1.4.17 – lokale Transportauswahl vor Spieldaten
 
 Dieser Stand enthält Worker, Durable Objects, Browser-Spieler und TV-Web-App für dauerhafte Räume, bevorzugte WLAN-Direktverbindungen und optionalen Spotify-TV-Ton.
 
@@ -6,7 +6,7 @@ Dieser Stand enthält Worker, Durable Objects, Browser-Spieler und TV-Web-App f�
 
 1. Der Browser stellt zunächst nur die Cloud-Verbindung her und authentifiziert sich.
 2. `WELCOME` enthält ausschließlich Raum-/Teilnehmerdaten und lokale Kandidaten, aber keinen Spielsnapshot.
-3. Die lokalen Kandidaten werden in sinnvoller Reihenfolge geprüft (LAN vor Loopback auf Cloud-Seiten).
+3. Alle lokalen Kandidaten werden parallel geprüft.
 4. Der Browser meldet ausdrücklich `TRANSPORT_SELECTED: local|cloud`.
 5. Nur bei Cloud-Auswahl wird der Teilnehmer im Durable Object gespeichert und beim Haupthandy ein frischer, gezielter Snapshot angefordert.
 6. Laufende Spielzustände werden über Cloudflare nur transient weitergeleitet und nicht gespeichert.
@@ -28,14 +28,3 @@ Siehe `docs/DEPLOYMENT.md`, `docs/API.md` und `docs/SPOTIFY_GERAET_ZIELBILD.md`.
 ## Kompatibilität mit dem bestehenden Worker `hitr`
 
 Der veröffentlichte Worker besitzt zusätzlich den Durable-Object-Namespace `UsageGuard` aus Migration `v2`. Der aktuelle Spielablauf verwendet ihn nicht aktiv, aber `src/worker.js` exportiert die Klasse weiterhin und `wrangler.jsonc` enthält die Bindung `GUARD`. Diese Einträge dürfen ohne ausdrückliche `delete_class`- oder `rename_class`-Migration nicht entfernt werden.
-
-
-## Upload vom Android-Handy
-
-Das Repository `Resa59/hitr` wird mit dem dauerhaft eingerichteten Termux-Befehl aktualisiert:
-
-```bash
-hitster-cloudflare-push
-```
-
-Das Paket enthält `.github/workflows/deploy-cloudflare.yml`, damit GitHub Actions den Worker anschließend direkt mit Wrangler deployen kann. Die Repository-Secrets `CLOUDFLARE_API_TOKEN` und `CLOUDFLARE_ACCOUNT_ID` müssen vorhanden sein. Falls parallel Cloudflare Workers Builds aktiviert sind, sollte nur ein gewünschter Deploymentweg dauerhaft aktiv bleiben.

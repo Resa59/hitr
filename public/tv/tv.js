@@ -1,7 +1,7 @@
 "use strict";
 const $=id=>document.getElementById(id),P=window.HitsterRealtimeProtocol;
 const TV_SESSION_STORE="hitster_realtime_tv_session_v2";
-const T={descriptor:null,transport:null,participantId:"",resumeToken:"",lastSequence:0,userClosed:false,retry:0,timer:null,currentState:{},pages:[],pageIndex:0,pageTimer:null,readyTimer:null,audio:null};
+const T={descriptor:null,transport:null,participantId:"",resumeToken:"",lastSequence:0,userClosed:false,retry:0,timer:null,currentState:{},pages:[],pageIndex:0,pageTimer:null,audio:null,transportDiagnostics:[],playbackTimer:null};
 T.audio=window.HitsterTvSpotifyAudioController?new HitsterTvSpotifyAudioController({protocol:P,getDescriptor:()=>T.descriptor,getTransport:()=>T.transport,getParticipantId:()=>T.participantId,button:$("tvAudioButton")}):null;
 window.HitsterRealtimeCanSwitchLocal=()=>T.audio?.canSwitchLocal?.()!==false;
 
@@ -11,89 +11,48 @@ updateViewport();window.addEventListener("resize",()=>{updateViewport()},{passiv
 try{if(location.hash.length>2)T.descriptor=P.parseJoinLink(location.href)}catch(e){$("joinMessage").textContent=e.message}
 try{const h=new URLSearchParams(location.hash.replace(/^#/,""));T.participantId=h.get("pid")||"";T.resumeToken=h.get("resume")||"";T.lastSequence=Number(h.get("seq")||0)}catch(_){}
 try{const saved=JSON.parse(localStorage.getItem(TV_SESSION_STORE)||"null");if(saved&&T.descriptor&&saved.sessionId===T.descriptor.sessionId){T.participantId=saved.participantId||T.participantId;T.resumeToken=saved.resumeToken||T.resumeToken;T.lastSequence=Number(saved.lastSequence||T.lastSequence||0)}}catch(_){}
-$("openPairing").onclick=resetToPairing;$("nextSession").onclick=resetToPairing;$("previousPage").onclick=()=>setPage(T.pageIndex-1,true);$("nextPage").onclick=()=>setPage(T.pageIndex+1,true);$("fullscreenButton").onclick=toggleFullscreen;$("retryLocal").onclick=retryLocalConnection;document.addEventListener("fullscreenchange",updateFullscreenButton);updateFullscreenButton();
+$("clearTvDiagnostics").onclick=()=>{T.transportDiagnostics=[];T.transport?.diagnostic?.("diagnostics_cleared",{});renderTvDiagnostics();};$("pairButton").onclick=resetToPairing;$("nextSession").onclick=resetToPairing;$("previousPage").onclick=()=>setPage(T.pageIndex-1,true);$("nextPage").onclick=()=>setPage(T.pageIndex+1,true);$("fullscreenButton").onclick=toggleFullscreen;document.addEventListener("fullscreenchange",updateFullscreenButton);updateFullscreenButton();
 
-async function startPairedConnection(){
-  if(!T.descriptor){$("joinMessage").textContent="Kein TV-Pairing vorhanden. Neuer Pairing-Code wird geöffnet …";return setTimeout(resetToPairing,250)}
-  $("joinMessage").textContent="Verbindung zum Haupthandy wird hergestellt …";
-  try{await connect()}catch(e){$("joinMessage").textContent=e.message}
-}
-async function connect(){T.userClosed=false;setStatus(false,"Cloud-Verbindung wird hergestellt …");const t=new CloudFirstRealtimeTransport(T.descriptor,{role:"tv",localPath:"/tv/",connectTimeoutMs:9000,canSwitchLocal:()=>window.HitsterRealtimeCanSwitchLocal?.()!==false});T.transport=t;
+async function connect(){T.userClosed=false;setStatus(false,"Cloud-Verbindung wird hergestellt …");const t=new CloudFirstRealtimeTransport(T.descriptor,{role:"tv",localPath:"/tv/",connectTimeoutMs:9000});T.transport=t;
+  t.onDiagnostic=recordTvDiagnostic;
   t.onMessage=(raw,transport)=>message(raw,transport);
-  t.onClose=info=>{if(T.userClosed)return;if(Number(info?.code)===4003){const reason=String(info?.reason||"");return showPairingReset(reason&&reason!=="removed"?reason:"Der Fernseher wurde vom Haupthandy getrennt.");}reconnect()};
+  t.onClose=()=>{if(!T.userClosed)reconnect()};
   t.onError=error=>{const message=error?.message||"Verbindung gestört";setStatus(false,message);$("joinMessage").textContent=message;};
-  t.onTransport=(name,phase)=>{const label=name==="local"?"Lokales WLAN":"Cloud",texts={bootstrap:"Lokales WLAN wird geprüft …",probing:"Lokales WLAN wird geprüft …",selecting:"Cloud wird als Rückfallverbindung aktiviert …",switching:"Wechsel ins lokale WLAN …","local-unavailable":"Cloud verbunden · lokaler Direktweg nicht erreichbar",fallback:"Lokale Verbindung verloren · Wechsel zur Cloud …","secure-audio":"Sichere Cloud-Verbindung für TV-Ton"};setStatus(phase==="welcome"||phase==="local-unavailable",texts[phase]||`${label}${phase==="welcome"?" verbunden":" wird verbunden …"}`);updateLocalRetry(name,phase)};
-  t.onLocalUnavailable=()=>updateLocalRetry("cloud","local-unavailable");
+  t.onTransport=(name,phase)=>{const label=name==="local"?"Lokales WLAN":"Cloud",texts={bootstrap:"Lokales WLAN wird geprüft …",probing:"Lokales WLAN wird geprüft …",selecting:"Cloud wird als Rückfallverbindung aktiviert …",switching:"Wechsel ins lokale WLAN …","secure-audio":"Sichere Cloud-Verbindung für TV-Ton"};setStatus(phase==="welcome",texts[phase]||`${label}${phase==="welcome"?" verbunden":" wird verbunden …"}`)};
   t.onCloudSelected=()=>sendTransportSelection("cloud");
   t.onBeforeLocalSwitch=()=>sendTransportSelection("local");
   t.onOpen=()=>t.send(JSON.stringify(P.envelope(P.TYPES.HELLO,T.descriptor.sessionId,{role:"tv",inviteToken:T.descriptor.inviteToken,clientId:stableClientId(),displayName:"Hitster TV",participantId:T.participantId||null,resumeToken:T.resumeToken||null,lastSequence:T.lastSequence,connectionAttemptId:P.randomId(12)})));
   await t.connect()
 }
-
-async function retryLocalConnection(){
-  const button=$("retryLocal");
-  if(!T.transport?.retryLocal)return;
-  button.disabled=true;
-  try{
-    if(window.HitsterRealtimeCanSwitchLocal?.()===false)throw new Error("TV-Ton benötigt die sichere Cloud-Verbindung. Wähle zuerst ein anderes Spotify-Gerät.");
-    await T.transport.retryLocal();
-  }catch(error){setStatus(false,error?.message||"Lokaler Direktweg nicht erreichbar");}
-  finally{button.disabled=false;}
-}
-function updateLocalRetry(name,phase){
-  const button=$("retryLocal"),hasCandidates=Array.isArray(T.descriptor?.localCandidates)&&T.descriptor.localCandidates.length>0;
-  const secureAudio=window.HitsterRealtimeCanSwitchLocal?.()===false;
-  button.classList.toggle("hidden",name==="local"||!hasCandidates||secureAudio);
-  button.title=secureAudio?"TV-Ton benötigt HTTPS und bleibt deshalb in der Cloud.":"Lokale Verbindung zum Haupthandy erneut versuchen";
-}
-
-
-function sendTvReadyHeartbeat(needsSnapshot=false){if(!T.transport||!T.participantId||!T.descriptor||T.userClosed)return;try{T.transport.send(JSON.stringify(P.envelope(P.TYPES.TV_READY,T.descriptor.sessionId,{participantId:T.participantId,displayName:"Hitster TV",role:"tv",needsSnapshot:!!needsSnapshot},{sender:{role:"tv",id:T.participantId}})))}catch(_){}}
-function startTvReadyHeartbeat(needsSnapshot=false){clearInterval(T.readyTimer);sendTvReadyHeartbeat(needsSnapshot);T.readyTimer=setInterval(()=>sendTvReadyHeartbeat(false),4000)}
-
 function sendTransportSelection(transport){if(!T.transport)return;T.transport.send(JSON.stringify(P.envelope(P.TYPES.TRANSPORT_SELECTED,T.descriptor.sessionId,{transport,resumed:!!T.resumeToken,participantId:T.participantId||null})))}
 function stableClientId(){try{let id=localStorage.getItem("hitster_tv_client_id");if(!id){id=P.randomId(18);localStorage.setItem("hitster_tv_client_id",id)}return id}catch(_){return P.randomId(18)}}
 function persistTvSession(){try{if(!T.descriptor||!T.participantId)return;localStorage.setItem(TV_SESSION_STORE,JSON.stringify({sessionId:T.descriptor.sessionId,participantId:T.participantId,resumeToken:T.resumeToken,lastSequence:T.lastSequence}))}catch(_){}}
 function clearTvSession(){try{localStorage.removeItem(TV_SESSION_STORE)}catch(_){}T.participantId="";T.resumeToken="";T.lastSequence=0}
 function message(raw,transport){let m;try{m=P.assertEnvelope(JSON.parse(raw),T.descriptor.sessionId)}catch(e){return setStatus(false,e.message)}
   if(T.audio?.handleMessage?.(m))return;
-  if(m.type===P.TYPES.WELCOME){if((transport||m.payload.transport)==="cloud"&&(!Array.isArray(m.payload?.capabilities)||!m.payload.capabilities.includes("transport-selection-v1"))){const text="Der veröffentlichte Cloudflare-Worker ist veraltet. Bitte das aktuelle Cloudflare-Paket deployen.";setStatus(false,text);$("joinMessage").textContent=text;T.userClosed=true;T.transport?.close(4009,"incompatible-worker");return;}T.retry=0;T.participantId=m.payload.participantId;T.resumeToken=m.payload.resumeToken;if(Number(m.sequence||0)>0)T.lastSequence=Number(m.sequence);persistTvSession();T.transport?.confirmWelcome?.(transport||m.payload.transport,m.payload);if((transport||m.payload.transport)==="local"){$("join").classList.add("hidden");$("stage").classList.remove("hidden");setStatus(true,"Verbunden · Lokales WLAN");updateLocalRetry("local","welcome");T.audio?.onWelcome?.("local");render(m.payload.snapshot||{phase:"lobby"});startTvReadyHeartbeat(false)}return}
-  if(m.type===P.TYPES.TRANSPORT_CONFIRMED){if(m.payload?.transport!=="cloud")return;T.transport?.confirmTransport?.("cloud");$("join").classList.add("hidden");$("stage").classList.remove("hidden");setStatus(true,"Verbunden · Cloud");T.audio?.onWelcome?.("cloud");render(T.currentState&&Object.keys(T.currentState).length?T.currentState:{phase:"lobby"});startTvReadyHeartbeat(false);return}
+  if(m.type===P.TYPES.WELCOME){if((transport||m.payload.transport)==="cloud"&&(!Array.isArray(m.payload?.capabilities)||!m.payload.capabilities.includes("transport-selection-v1"))){const text="Der veröffentlichte Cloudflare-Worker ist veraltet. Bitte das aktuelle Cloudflare-Paket deployen.";setStatus(false,text);$("joinMessage").textContent=text;T.userClosed=true;T.transport?.close(4009,"incompatible-worker");return;}T.retry=0;T.participantId=m.payload.participantId;T.resumeToken=m.payload.resumeToken;if(Number(m.sequence||0)>0)T.lastSequence=Number(m.sequence);persistTvSession();T.transport?.confirmWelcome?.(transport||m.payload.transport,m.payload);if((transport||m.payload.transport)==="local"){$("join").classList.add("hidden");$("stage").classList.remove("hidden");setStatus(true,"Verbunden · Lokales WLAN");T.audio?.onWelcome?.("local");render(m.payload.snapshot||{phase:"lobby"})}return}
+  if(m.type===P.TYPES.TRANSPORT_CONFIRMED){if(m.payload?.transport!=="cloud")return;T.transport?.confirmTransport?.("cloud");$("join").classList.add("hidden");$("stage").classList.remove("hidden");setStatus(true,"Verbunden · Cloud");T.audio?.onWelcome?.("cloud");render(T.currentState&&Object.keys(T.currentState).length?T.currentState:{phase:"lobby"});return}
   if(m.type===P.TYPES.TV_STATE||m.type===P.TYPES.TV_SNAPSHOT){const seq=Number(m.sequence||0);if(seq&&seq<=T.lastSequence)return;T.lastSequence=seq||T.lastSequence;persistTvSession();setStatus(true,"Mit dem Haupthandy verbunden");render(m.payload||{});return}
-  if(m.type===P.TYPES.REMOVED){showPairingReset(m.payload?.reason||"Der Fernseher wurde vom Haupthandy getrennt.");return}
-  if(m.type===P.TYPES.SESSION_ENDED){if(m.payload?.finalSnapshot)render(m.payload.finalSnapshot);showPairingReset("Der Raum wurde vom Haupthandy geschlossen.");return}
+  if(m.type===P.TYPES.REMOVED){const reason=m.payload?.reason||"Der Fernseher wurde vom Haupthandy getrennt.";setStatus(false,reason);clearTvSession();T.userClosed=true;try{T.transport?.close()}catch(_){}setTimeout(()=>location.replace(`/pair.html?notice=${encodeURIComponent(reason)}`),900);return}
+  if(m.type===P.TYPES.SESSION_ENDED){if(m.payload?.finalSnapshot)render(m.payload.finalSnapshot);setStatus(false,"Der Raum wurde geschlossen");clearTvSession();T.userClosed=true;T.transport?.close();$("nextSession").classList.remove("hidden");return}
   if(m.type===P.TYPES.ERROR)setStatus(false,m.payload?.message||"Verbindungsfehler")
 }
 function reconnect(){setStatus(false,"Verbindung unterbrochen – Wiederverbindung läuft");clearTimeout(T.timer);const wait=Math.min(20000,800*Math.pow(1.7,Math.min(T.retry++,9)));T.timer=setTimeout(async()=>{try{await connect()}catch(_){reconnect()}},wait)}
 function setStatus(on,text){$("dot").classList.toggle("on",on);$("connection").textContent=text}
-
-function renderLobbyJoin(s,phase){
-  const panel=$("lobbyJoin"),show=phase==="lobby"&&!!s.roomCode&&!!s.playerJoinUrl;
-  panel.classList.toggle("hidden",!show);
-  if(!show)return;
-  $("lobbyRoomCode").textContent=String(s.roomCode||"").toUpperCase();
-  const qr=$("lobbyJoinQr"),url=String(s.playerJoinUrl||"");
-  if(qr.dataset.url!==url){qr.dataset.url=url;qr.innerHTML="";if(url&&window.QRCode)new QRCode(qr,{text:url,width:220,height:220,correctLevel:QRCode.CorrectLevel.M})}
-  const list=$("lobbyPlayers");list.innerHTML="";for(const p of Array.isArray(s.participants)?s.participants:[]){const row=document.createElement("div");row.className="lobby-player"+(p.host?" host":"");row.textContent=`${p.name||"Spieler"}${p.host?" · Haupthandy":""}`;list.appendChild(row)}
-}
-function showPairingReset(message){
-  T.userClosed=true;clearTimeout(T.timer);clearTimeout(T.pageTimer);clearInterval(T.readyTimer);T.readyTimer=null;clearTvSession();$("retryLocal").classList.add("hidden");try{T.transport?.close()}catch(_){}
-  $("join").classList.add("hidden");$("stage").classList.remove("hidden");$("nextSession").classList.remove("hidden");
-  setStatus(false,message||"Vom Haupthandy getrennt.");render({phase:"disconnected",headline:"Fernseher getrennt",subline:message||"Vom Haupthandy getrennt."});
-  setTimeout(()=>{if(T.userClosed)location.replace(`/pair.html?new=${Date.now()}`)},2600);
-}
+function tvDiagnosticDetail(value){if(value==null)return"";if(typeof value!=="object")return String(value);return Object.entries(value).filter(([key])=>!/(token|invite|session)/i.test(key)).map(([key,item])=>`${key}=${Array.isArray(item)?item.join(", "):typeof item==="object"?JSON.stringify(item):String(item)}`).join(" · ")}
+function renderTvDiagnostics(){const box=$("tvDiagnosticsText");if(!box)return;const candidates=Array.isArray(T.descriptor?.localCandidates)?T.descriptor.localCandidates:[],lines=[`Seite: ${location.origin}${location.pathname}`,`Kandidaten: ${candidates.length?candidates.join(" | "):"keine empfangen"}`,`Aktiver Transport: ${T.transport?.active||"noch keiner"}`,""];for(const entry of T.transportDiagnostics.slice(-45)){let time="--:--:--";try{time=new Date(entry.time).toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit",second:"2-digit"})}catch(_){}lines.push(`${time}  ${entry.stage||"event"}${tvDiagnosticDetail(entry)?`  ${tvDiagnosticDetail(entry)}`:""}`)}if(!T.transportDiagnostics.length)lines.push("Noch keine Verbindungsereignisse.");box.textContent=lines.join("\n")}
+function recordTvDiagnostic(entry){T.transportDiagnostics.push(entry||{time:Date.now(),stage:"unknown"});if(T.transportDiagnostics.length>80)T.transportDiagnostics.splice(0,T.transportDiagnostics.length-80);renderTvDiagnostics()}
 
 function phaseLabel(phase){return({connecting:"VERBINDUNG",lobby:"SPIELLOBBY",round_intro:"NÄCHSTE RUNDE",playing:"LIED LÄUFT",input_wait:"ANTWORT",review_wait:"AUSWERTUNG",reveal:"AUFLÖSUNG",round_results:"RUNDENERGEBNIS",scoreboard:"ZWISCHENSTAND",statistics:"STATISTIKEN",summary:"SPIELENDE",ended:"SPIELENDE",aborted:"ABGEBROCHEN",disconnected:"VERBINDUNG"})[phase]||"HITSTER"}
 function defaultHeadline(p){return({connecting:"Hitster TV",lobby:"Spiel wird vorbereitet",round_intro:"Nächster Spieler",playing:"Unbekannter Titel läuft",input_wait:"Jetzt antworten",review_wait:"Wertungen werden geprüft",reveal:"Auflösung",round_results:"Rundenauswertung",scoreboard:"Zwischenstand",statistics:"Spielstatistiken",summary:"Spiel beendet",ended:"Spiel beendet",aborted:"Spiel abgebrochen",disconnected:"Verbindung verloren"})[p]||"Hitster"}
 function defaultSubline(p){return({connecting:"Warte auf das Haupthandy",lobby:"Warte auf den Spielstart",playing:"Hört gut zu",input_wait:"Die Eingabe bleibt auf dem Handy privat",review_wait:"Warte auf alle Spieler",reveal:"Die richtige Lösung",round_results:"Punkte dieser Runde",scoreboard:"Aktueller Punktestand",statistics:"Vergleich aller Spieler",summary:"Gesamtauswertung",ended:"Gesamtauswertung",aborted:"Die laufende Runde wurde verworfen",disconnected:"Wiederverbindung läuft"})[p]||""}
 
 function render(s){T.currentState=s||{};const phase=s.phase||"connecting",stage=$("stage");stage.dataset.phase=phase;
-  renderLobbyJoin(s,phase);
   $("round").textContent=[phaseLabel(phase),s.round?`RUNDE ${s.round}`:""].filter(Boolean).join(" · ");
   $("headline").textContent=s.headline||defaultHeadline(phase);$("subline").textContent=s.subline||defaultSubline(phase);
   $("currentPlayer").textContent=s.currentPlayer||"";$("playerBadge").classList.toggle("hidden",!s.currentPlayer);
   const privatePhase=["playing","input_wait","review_wait"].includes(phase);$("privacyNote").classList.toggle("hidden",!privatePhase);
-  $("disc").classList.toggle("playing",phase==="playing");configurePages(s,false)
+  clearTimeout(T.playbackTimer);T.playbackTimer=null;const playbackUntil=Number(s.playbackUntil||0),discPlaying=phase==="playing"&&(!playbackUntil||playbackUntil>Date.now());$("disc").classList.toggle("playing",discPlaying);if(discPlaying&&playbackUntil)T.playbackTimer=setTimeout(()=>{$("disc").classList.remove("playing")},Math.max(40,playbackUntil-Date.now()+40));configurePages(s,false)
 }
 
 function pageCapacity(kind){const h=window.visualViewport?.height||window.innerHeight,w=window.visualViewport?.width||window.innerWidth,narrow=w<1050;
@@ -136,9 +95,10 @@ function statisticsCards(stats){if(!stats||typeof stats!=="object")return[];cons
 function categoryName(k){return({title:"Titel",artist:"Künstler",decade:"Jahrzehnt",year:"Jahr",accuracy:"Trefferquote",points:"Punkte",perfect:"Perfekte Runden"})[k]||String(k).replace(/_/g," ")}
 function formatValue(v){if(v&&typeof v==="object"){if(v.correct!=null&&v.total!=null)return`${num(v.correct)} / ${num(v.total)}`;if(v.percentage!=null)return`${num(v.percentage)} %`;return Object.values(v).slice(0,2).map(formatValue).join(" / ")}return typeof v==="number"?num(v):esc(v)}
 function rate(r){const m=Number(r?.maxPoints??r?.max??0);return m>0?Number(r?.points||0)*100/m:Number(r?.percentage||0)}function num(v){const n=Number(v||0);return Number.isInteger(n)?String(n):n.toFixed(1)}
-async function resetToPairing(){T.userClosed=true;clearTimeout(T.timer);clearTimeout(T.pageTimer);clearTvSession();$("retryLocal").classList.add("hidden");try{await T.transport?.close()}catch(_){}location.replace(`/pair.html?new=${Date.now()}`)}
+async function resetToPairing(){T.userClosed=true;clearTimeout(T.timer);clearTimeout(T.pageTimer);clearTvSession();try{await T.transport?.close()}catch(_){}location.replace("/pair.html")}
 async function toggleFullscreen(){try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen()}catch(_){setStatus(false,"Vollbild wird nicht unterstützt")}}
 function updateFullscreenButton(){const b=$("fullscreenButton");if(!document.fullscreenEnabled){b.classList.add("hidden");return}b.textContent=document.fullscreenElement?"Vollbild beenden":"Vollbild";updateViewport()}
 function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c])}
 window.HitsterRealtimeHandoff=()=>({participantId:T.participantId,resumeToken:T.resumeToken,lastSequence:T.lastSequence,displayName:"Hitster TV"});
-if("serviceWorker" in navigator)navigator.serviceWorker.register("/tv/sw.js").catch(()=>{});startPairedConnection();
+renderTvDiagnostics();
+if("serviceWorker" in navigator)navigator.serviceWorker.register("/tv/sw.js").catch(()=>{});if(T.descriptor)connect().catch(e=>{$("joinMessage").textContent=e.message});else $("joinMessage").textContent="Bitte am Haupthandy den TV-Code scannen oder auf diesem Fernseher einen neuen TV-Code anzeigen.";

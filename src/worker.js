@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 
 const VERSION = 1;
-const BUILD = "1.4.18";
+const BUILD = "1.4.18-diagnose1";
 const CAPABILITIES = ["transport-selection-v1", "tv-pair-v1", "host-activity-timeout-v1"];
 const MAX_BYTES = 32 * 1024;
 const SESSION_INACTIVITY_MS = 15 * 60 * 1000;
@@ -311,7 +311,7 @@ export class SessionRoom extends DurableObject {
         const notice = envelope("REMOVED", d.sessionId, { reason }, { sender: { role: "host", id: d.hostInstanceId }, target: { role, participantId: id } });
         for (const socket of this.sockets()) {
           const a = wsAttachment(socket); if (a.participantId !== id || a.role !== role) continue;
-          safeSend(socket, notice); await new Promise(resolve => setTimeout(resolve, 180)); try { socket.close(4003, "removed"); } catch (_) {}
+          safeSend(socket, notice); try { socket.close(4003, "removed"); } catch (_) {}
         }
       }
       if (removed > 0) {
