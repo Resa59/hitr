@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 
 const VERSION = 1;
-const BUILD = "1.4.18-diagnose8";
+const BUILD = "1.4.18-diagnose10";
 const CAPABILITIES = ["transport-selection-v1", "hybrid-data-channel-v1", "delivery-batch-v1", "tv-pair-v1", "host-activity-timeout-v1", "inactivity-confirm-v1"];
 const MAX_BYTES = 32 * 1024;
 const SESSION_INACTIVITY_MS = 15 * 60 * 1000;
@@ -304,6 +304,8 @@ export class SessionRoom extends DurableObject {
       const previous = Number(await this.ctx.storage.get("lastHostActivityAt") || 0);
       const latest = Math.max(previous, activityAt);
       if (latest !== previous) await this.ctx.storage.put("lastHostActivityAt", latest);
+      // Eine echte Aktivitätsbestätigung hebt eine möglicherweise bereits laufende
+      // 15-Sekunden-Rückfrage auf und plant die reguläre Frist neu.
       await this.ctx.storage.delete("pendingInactivityCheck");
       await this.scheduleLifecycleAlarm(d, latest);
       return json({ ok: true, activityAt: latest, inactivityDeadline: latest + SESSION_INACTIVITY_MS });
@@ -313,11 +315,22 @@ export class SessionRoom extends DurableObject {
       if (!d || body.hostInviteToken !== d.hostInviteToken) return json({ ok: false, error: "Host-Autorisierung ungültig." }, 403);
       const role = clean(body.role || "player", 20), participantId = clean(body.participantId, 180), reason = clean(body.reason || "Vom Haupthandy entfernt", 120);
       const roster = (await this.ctx.storage.get("roster")) || {};
-      const ids = Object.values(roster).filter(record => record.role === role && (!participantId || record.participantId === participantId)).map(record => record.participantId);
+      // Der Cloud-WebSocket bleibt auch beim lokalen Datenweg als Steuerkanal offen,
+      // wird dann aber bewusst nicht mehr als selected im Cloud-Roster geführt.
+      // Ein Kick muss deshalb Roster UND authentifizierte Steuerkanäle auswerten.
+      const ids = new Set(Object.values(roster)
+        .filter(record => record.role === role && (!participantId || record.participantId === participantId))
+        .map(record => record.participantId));
+      for (const socket of this.sockets()) {
+        const a = wsAttachment(socket);
+        if (!a.authenticated || a.role !== role || (participantId && a.participantId !== participantId)) continue;
+        if (a.participantId) ids.add(a.participantId);
+      }
       let removed = 0;
       for (const id of ids) {
-        const record = roster[id]; if (!record) continue;
-        delete roster[id]; removed++;
+        if (!id) continue;
+        if (roster[id]) delete roster[id];
+        removed++;
         await this.ctx.storage.delete(`participant:${id}`);
         const notice = envelope("REMOVED", d.sessionId, { reason }, { sender: { role: "host", id: d.hostInstanceId }, target: { role, participantId: id } });
         for (const socket of this.sockets()) {
@@ -482,8 +495,11 @@ export class SessionRoom extends DurableObject {
         await this.selectTransport(ws, message, d, a);
         return;
       }
-      if (!a.selected && a.role !== "host") throw new Error("Transportauswahl ist noch nicht abgeschlossen.");
+      // LEAVE ist ein Steuerereignis und muss auch dann über den offenen
+      // Cloudkanal akzeptiert werden, wenn der Teilnehmer seine Nutzdaten lokal
+      // überträgt und deshalb cloudseitig selected=false ist.
       if (message.type === "LEAVE") {
+        if (a.role === "host") throw new Error("Der Host beendet den Raum über /end.");
         message.sender = { role: a.role, id: a.participantId, name: a.displayName };
         message.target = { role: "host", participantId: null };
         for (const target of this.sockets()) if (wsAttachment(target).role === "host") safeSend(target, message);
@@ -495,6 +511,7 @@ export class SessionRoom extends DurableObject {
         await this.publishPresence();
         return;
       }
+      if (!a.selected && a.role !== "host") throw new Error("Transportauswahl ist noch nicht abgeschlossen.");
       if (this.recent.has(message.messageId)) return;
       this.recent.add(message.messageId); if (this.recent.size > 2048) this.recent.delete(this.recent.values().next().value);
       if (a.role === "host") {
@@ -577,44 +594,47 @@ export class SessionRoom extends DurableObject {
     const inactivityDeadline = (lastActivity || now) + SESSION_INACTIVITY_MS;
     const absoluteDeadline = Number(d.expiresAt || now);
     const endDeadline = d.ended ? Number(d.deleteAfter || now) : Number.POSITIVE_INFINITY;
-    const nextDeadline = Math.min(inactivityDeadline, absoluteDeadline, endDeadline);
-    if (nextDeadline > now + 750) {
-      await this.ctx.storage.setAlarm(nextDeadline);
+
+    // Explizites Raumende und absolute Ablaufzeit werden nicht künstlich verzögert.
+    if (d.ended || absoluteDeadline <= now) {
+      const reason = d.ended ? (d.endReason || "host_closed_room") : "session_expired";
+      await this.closeAndDelete(d, reason);
       return;
     }
-    if (!d.ended && absoluteDeadline > now && inactivityDeadline <= now) {
-      const pending = await this.ctx.storage.get("pendingInactivityCheck");
-      if (pending && lastActivity > Number(pending.activityAt || 0)) {
-        await this.ctx.storage.delete("pendingInactivityCheck");
-        await this.scheduleLifecycleAlarm(d, lastActivity);
-        return;
-      }
-      if (pending && Number(pending.deadline || 0) > now + 750) {
-        await this.ctx.storage.setAlarm(Number(pending.deadline));
-        return;
-      }
-      if (!pending) {
-        const hostSockets = this.sockets().filter(ws => {
-          const a = wsAttachment(ws);
-          return a.authenticated && a.role === "host";
-        });
-        if (hostSockets.length) {
-          const deadline = now + INACTIVITY_CONFIRM_GRACE_MS;
-          await this.ctx.storage.put("pendingInactivityCheck", { activityAt: lastActivity, deadline });
-          const check = envelope("SESSION_ACTIVITY_CHECK", d.sessionId, {
-            reason: "host_inactive_15m",
-            activityAt: lastActivity,
-            deadline
-          }, { sender: { role: "server", id: "cloud" }, target: { role: "host", participantId: null } });
-          for (const ws of hostSockets) safeSend(ws, check);
-          await this.ctx.storage.setAlarm(deadline);
-          return;
-        }
-      }
+
+    if (inactivityDeadline > now + 750) {
+      await this.ctx.storage.delete("pendingInactivityCheck");
+      await this.ctx.storage.setAlarm(Math.min(inactivityDeadline, absoluteDeadline, endDeadline));
+      return;
     }
-    const reason = d.ended ? (d.endReason || "host_closed_room")
-      : absoluteDeadline <= now ? "session_expired" : "host_inactive_15m";
-    await this.closeAndDelete(d, reason);
+
+    const pending = await this.ctx.storage.get("pendingInactivityCheck");
+    if (pending) {
+      const graceDeadline = Number(pending.deadline || 0);
+      if (graceDeadline > now + 250) {
+        await this.ctx.storage.setAlarm(Math.min(graceDeadline, absoluteDeadline, endDeadline));
+        return;
+      }
+      await this.closeAndDelete(d, "host_inactive_15m");
+      return;
+    }
+
+    const hostSockets = this.sockets().filter(socket => {
+      const attachment = wsAttachment(socket);
+      return attachment.authenticated && attachment.role === "host";
+    });
+    if (hostSockets.length) {
+      const deadline = now + INACTIVITY_CONFIRM_GRACE_MS;
+      await this.ctx.storage.put("pendingInactivityCheck", { activityAt: lastActivity, requestedAt: now, deadline });
+      const check = envelope("SESSION_ACTIVITY_CHECK", d.sessionId, {
+        activityAt: lastActivity, requestedAt: now, deadline
+      }, { sender: { role: "server", id: "cloud" }, target: { role: "host", participantId: d.hostInstanceId } });
+      for (const socket of hostSockets) safeSend(socket, check);
+      await this.ctx.storage.setAlarm(Math.min(deadline, absoluteDeadline, endDeadline));
+      return;
+    }
+
+    await this.closeAndDelete(d, "host_inactive_15m");
   }
 }
 

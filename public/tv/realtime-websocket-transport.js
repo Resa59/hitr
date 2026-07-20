@@ -344,6 +344,28 @@
       return link.send(value);
     }
 
+    // Dauerhafte Verwaltungsereignisse wie LEAVE müssen beide aktuell offenen
+    // Wege erreichen. So wird der Teilnehmer auch dann lokal und in Cloudflare
+    // entfernt, wenn genau während des Trennens einer der beiden Kanäle abbricht.
+    // Dieselbe messageId erlaubt dem Host, doppelt eintreffende Meldungen sicher
+    // zu deduplizieren.
+    sendAll(value) {
+      let sent = 0;
+      let lastError = null;
+      for (const name of ["cloud", "local"]) {
+        if (!this.links[name]?.open) continue;
+        try { sent += Number(this.links[name].send(value) || 0); }
+        catch (error) {
+          lastError = error;
+          this.diagnostic("broadcast_send_failed", { transport: name, error: error?.message || String(error) });
+        }
+      }
+      if (!sent && lastError) throw lastError;
+      if (!sent) throw new Error("Keine TV-Verbindung ist zum Trennen geöffnet.");
+      this.diagnostic("broadcast_sent", { type: this.messageInfo(value).type, transports: ["cloud", "local"].filter(name => this.links[name]?.open) });
+      return sent;
+    }
+
     messageInfo(value) {
       try {
         const parsed = JSON.parse(String(value));
