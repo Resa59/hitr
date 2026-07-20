@@ -3,69 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#0b0d11">
-  <title>Hitster Handy – Spotify Audio</title>
+  <title>Hitster Handy Spotify</title>
+  <style>
+    html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#0b0d11;color:#fff;font:14px system-ui,sans-serif}
+  </style>
 </head>
 <body>
-<script>
-(() => {
-  "use strict";
-  const CHANNEL = "hitster-phone-audio-v1";
-  const SDK_URL = "https://sdk.scdn.co/spotify-player.js";
-  const PLAYER_NAME = "Hitster Handy";
-  const READY_TIMEOUT_MS = 18000;
-  const state = { player:null, deviceId:"", connected:false, token:"", expiresAt:0, tokenWaiters:new Map(), connectPromise:null, readyTimer:null, started:false };
-  const randomId = () => { try { const a=new Uint8Array(12);crypto.getRandomValues(a);return [...a].map(v=>v.toString(16).padStart(2,"0")).join(""); } catch(_) { return Math.random().toString(36).slice(2)+Date.now().toString(36); } };
-  const send = (type,payload={}) => parent.postMessage({channel:CHANNEL,type,payload},"*");
-  const safeMessage = value => String(value||"").slice(0,240);
-  function environment(){return {href:location.href,origin:location.origin,secureContext:isSecureContext,visibility:document.visibilityState,userAgent:navigator.userAgent.slice(0,240),sdkPresent:!!window.Spotify?.Player};}
-  function provideToken(callback){
-    if(state.token&&state.expiresAt>Date.now()+45000){callback(state.token);return;}
-    const requestId=randomId();state.tokenWaiters.set(requestId,callback);send("TOKEN_REQUEST",{requestId});
-    setTimeout(()=>{const waiter=state.tokenWaiters.get(requestId);if(!waiter)return;state.tokenWaiters.delete(requestId);try{waiter("");}catch(_){}send("PLAYER_ERROR",{code:"token_timeout",message:"Spotify-Autorisierung vom Haupthandy hat zu lange gedauert."});},15000);
-  }
-  function handleToken(payload){
-    const requestId=String(payload?.requestId||"");const waiter=state.tokenWaiters.get(requestId);if(!waiter)return;
-    state.tokenWaiters.delete(requestId);
-    if(payload?.ok&&payload?.accessToken){state.token=String(payload.accessToken);state.expiresAt=Number(payload.expiresAt||Date.now()+45*60*1000);try{waiter(state.token);}catch(_){}send("TOKEN_ACCEPTED",{requestId,remainingSeconds:Math.max(0,Math.round((state.expiresAt-Date.now())/1000))});}
-    else{try{waiter("");}catch(_){}send("PLAYER_ERROR",{code:"token",message:safeMessage(payload?.error||"Spotify-Zugriffstoken fehlt.")});}
-  }
-  function loadSdk(){
-    if(window.Spotify?.Player)return Promise.resolve();
-    return new Promise((resolve,reject)=>{
-      const previous=window.onSpotifyWebPlaybackSDKReady;
-      window.onSpotifyWebPlaybackSDKReady=()=>{try{previous?.();}catch(_){}resolve();};
-      let script=document.querySelector(`script[src="${SDK_URL}"]`);
-      if(!script){script=document.createElement("script");script.src=SDK_URL;script.async=true;script.onerror=()=>reject(new Error("Spotify Web Playback SDK konnte nicht geladen werden."));document.head.appendChild(script);}
-      setTimeout(()=>{if(!window.Spotify?.Player)reject(new Error("Spotify Web Playback SDK antwortet nicht."));},20000);
-    });
-  }
-  function createPlayer(){
-    if(state.player)return;
-    state.player=new Spotify.Player({name:PLAYER_NAME,volume:.8,enableMediaSession:true,getOAuthToken:provideToken});
-    state.player.addListener("ready",({device_id})=>{clearTimeout(state.readyTimer);state.readyTimer=null;state.connectPromise=null;state.deviceId=String(device_id||"");state.connected=!!state.deviceId;send("PLAYER_READY",{deviceId:state.deviceId,deviceName:PLAYER_NAME});});
-    state.player.addListener("not_ready",({device_id})=>{if(!device_id||String(device_id)===state.deviceId)state.deviceId="";state.connected=false;state.connectPromise=null;send("PLAYER_NOT_READY",{deviceId:String(device_id||"")});});
-    state.player.addListener("player_state_changed",playback=>{if(playback)send("PLAYER_STATE",{paused:!!playback.paused});});
-    state.player.addListener("autoplay_failed",()=>send("AUTOPLAY_FAILED",{}));
-    for(const code of ["initialization_error","authentication_error","account_error","playback_error"]){state.player.addListener(code,({message})=>send("PLAYER_ERROR",{code,message:safeMessage(message||code)}));}
-  }
-  async function start(){
-    if(state.deviceId&&state.connected)return state.deviceId;
-    if(state.connectPromise)return state.connectPromise;
-    state.started=true;send("CONNECT_START",environment());
-    state.connectPromise=(async()=>{
-      await loadSdk();createPlayer();
-      const accepted=await state.player.connect();
-      if(!accepted)throw new Error("Spotify Web Playback konnte nicht verbunden werden.");
-      await new Promise((resolve,reject)=>{clearTimeout(state.readyTimer);state.readyTimer=setTimeout(()=>{state.readyTimer=null;reject(new Error("Spotify hat Hitster Handy nicht als Wiedergabegerät bestätigt."));},READY_TIMEOUT_MS);const check=()=>{if(state.deviceId&&state.connected)resolve();else if(state.connectPromise)setTimeout(check,100);};check();});
-      return state.deviceId;
-    })();
-    try{return await state.connectPromise;}catch(error){state.connectPromise=null;state.connected=false;send("PLAYER_ERROR",{code:"connect",message:safeMessage(error?.message||error)});return "";}
-  }
-  function disconnect(){clearTimeout(state.readyTimer);state.readyTimer=null;try{state.player?.disconnect?.();}catch(_){}state.player=null;state.deviceId="";state.connected=false;state.connectPromise=null;state.started=false;state.token="";state.expiresAt=0;send("DISCONNECTED",{});}
-  addEventListener("message",event=>{const msg=event.data;if(!msg||msg.channel!==CHANNEL)return;if(msg.type==="TOKEN_RESULT")handleToken(msg.payload);else if(msg.type==="START")start();else if(msg.type==="ACTIVATE"){try{state.player?.activateElement?.();}catch(_){}start();}else if(msg.type==="DISCONNECT")disconnect();else if(msg.type==="PING")send("FRAME_READY",environment());});
-  send("FRAME_READY",environment());
-})();
-</script>
+<script src="spotify-phone-player.js"></script>
 </body>
 </html>

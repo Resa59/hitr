@@ -86,8 +86,8 @@ assert.equal(activityBody.activityAt>=activityAt,true);
 assert.equal(storage.alarms.length,1);
 assert.ok(storage.alarms[0]>=activityAt+14*60*1000);
 
-// Wenn Android hart beendet wird und kein weiterer Aktivitätsbericht kommt,
-// schließt der Durable-Object-Alarm alle Clients und entfernt auch den Alias.
+// Am Ende der Frist fragt Cloudflare einen noch verbundenen Host genau einmal,
+// statt einen möglicherweise noch genutzten Raum sofort zu schließen.
 const staleDescriptor={...descriptor};
 const staleStorage=new Storage({
   descriptor:staleDescriptor,
@@ -97,12 +97,42 @@ const host=new Socket({authenticated:true,selected:true,role:'host',participantI
 const player=new Socket({authenticated:true,selected:true,role:'player',participantId:'player-1'});
 const staleRoom=new SessionRoom({storage:staleStorage,getWebSockets:()=>[host,player],acceptWebSocket(){}},env);
 await staleRoom.alarm();
-for(const socket of [host,player]){
+assert.equal(host.sent.at(-1)?.type,'SESSION_ACTIVITY_CHECK');
+assert.equal(player.sent.length,0);
+assert.equal(staleStorage.map.has('pendingInactivityCheck'),true);
+assert.equal(staleStorage.deletedAll,false);
+
+// Bestätigt der Host echte Aktivität, wird die Rückfrage gelöscht und der Raum
+// bleibt bestehen. Das erzeugt nur die ohnehin nötige Aktivitätsanfrage.
+const confirmAt=Date.now();
+const confirmResponse=await staleRoom.fetch(new Request('https://session/activity',{method:'POST',body:JSON.stringify({
+  hostInviteToken:descriptor.hostInviteToken,
+  activityAt:confirmAt,
+})}));
+assert.equal(confirmResponse.status,200);
+assert.equal(staleStorage.map.has('pendingInactivityCheck'),false);
+assert.equal(staleStorage.deletedAll,false);
+
+// Ohne Bestätigung endet der Raum nach der kurzen Gnadenfrist und der Alias wird
+// entfernt. Dazu wird die gespeicherte Frist im Test gezielt ablaufen gelassen.
+const abandonedStorage=new Storage({
+  descriptor:staleDescriptor,
+  lastHostActivityAt:Date.now()-15*60*1000-1500,
+});
+const abandonedHost=new Socket({authenticated:true,selected:true,role:'host',participantId:descriptor.hostInstanceId});
+const abandonedPlayer=new Socket({authenticated:true,selected:true,role:'player',participantId:'player-2'});
+const abandonedRoom=new SessionRoom({storage:abandonedStorage,getWebSockets:()=>[abandonedHost,abandonedPlayer],acceptWebSocket(){}},env);
+await abandonedRoom.alarm();
+assert.equal(abandonedHost.sent.at(-1)?.type,'SESSION_ACTIVITY_CHECK');
+const pending=abandonedStorage.map.get('pendingInactivityCheck');
+abandonedStorage.map.set('pendingInactivityCheck',{...pending,deadline:Date.now()-1});
+await abandonedRoom.alarm();
+for(const socket of [abandonedHost,abandonedPlayer]){
   assert.equal(socket.sent.at(-1)?.type,'SESSION_ENDED');
   assert.equal(socket.sent.at(-1)?.payload?.reason,'host_inactive_15m');
   assert.equal(socket.closed,true);
 }
-assert.equal(staleStorage.deletedAll,true);
+assert.equal(abandonedStorage.deletedAll,true);
 assert.equal(aliasCalls.some(call=>call.code===descriptor.roomCode&&call.body.sessionId===descriptor.sessionId),true);
 
 // Ein Alias darf nur von der zugehörigen Session gelöscht werden.
@@ -115,4 +145,4 @@ const right=await alias.fetch(new Request('https://alias/delete',{method:'POST',
 assert.equal(right.status,200);
 assert.equal(aliasStorage.map.size,0);
 
-console.log('Inaktivitätsvertrag: 15-Minuten-Frist, sparsames Aktivitätssignal, harte Prozessbeendigung und Alias-Bereinigung bestanden');
+console.log('Inaktivitätsvertrag: 15-Minuten-Frist, einmalige Host-Rückfrage, Bestätigung und Alias-Bereinigung bestanden');

@@ -2,9 +2,10 @@ import { DurableObject } from "cloudflare:workers";
 
 const VERSION = 1;
 const BUILD = "1.4.18-diagnose8";
-const CAPABILITIES = ["transport-selection-v1", "hybrid-data-channel-v1", "delivery-batch-v1", "tv-pair-v1", "host-activity-timeout-v1"];
+const CAPABILITIES = ["transport-selection-v1", "hybrid-data-channel-v1", "delivery-batch-v1", "tv-pair-v1", "host-activity-timeout-v1", "inactivity-confirm-v1"];
 const MAX_BYTES = 32 * 1024;
 const SESSION_INACTIVITY_MS = 15 * 60 * 1000;
+const INACTIVITY_CONFIRM_GRACE_MS = 15 * 1000;
 const ROOM_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const PLAYER_TYPES = new Set(["TRANSPORT_SELECTED", "ANSWER_SUBMITTED", "SCORE_CONFIRMED", "CLIENT_READY", "ACK", "PING", "LEAVE"]);
 const TV_TYPES = new Set(["TRANSPORT_SELECTED", "TV_READY", "TV_AUDIO_CAPABILITY", "ACK", "PING", "LEAVE"]);
@@ -303,6 +304,7 @@ export class SessionRoom extends DurableObject {
       const previous = Number(await this.ctx.storage.get("lastHostActivityAt") || 0);
       const latest = Math.max(previous, activityAt);
       if (latest !== previous) await this.ctx.storage.put("lastHostActivityAt", latest);
+      await this.ctx.storage.delete("pendingInactivityCheck");
       await this.scheduleLifecycleAlarm(d, latest);
       return json({ ok: true, activityAt: latest, inactivityDeadline: latest + SESSION_INACTIVITY_MS });
     }
@@ -579,6 +581,36 @@ export class SessionRoom extends DurableObject {
     if (nextDeadline > now + 750) {
       await this.ctx.storage.setAlarm(nextDeadline);
       return;
+    }
+    if (!d.ended && absoluteDeadline > now && inactivityDeadline <= now) {
+      const pending = await this.ctx.storage.get("pendingInactivityCheck");
+      if (pending && lastActivity > Number(pending.activityAt || 0)) {
+        await this.ctx.storage.delete("pendingInactivityCheck");
+        await this.scheduleLifecycleAlarm(d, lastActivity);
+        return;
+      }
+      if (pending && Number(pending.deadline || 0) > now + 750) {
+        await this.ctx.storage.setAlarm(Number(pending.deadline));
+        return;
+      }
+      if (!pending) {
+        const hostSockets = this.sockets().filter(ws => {
+          const a = wsAttachment(ws);
+          return a.authenticated && a.role === "host";
+        });
+        if (hostSockets.length) {
+          const deadline = now + INACTIVITY_CONFIRM_GRACE_MS;
+          await this.ctx.storage.put("pendingInactivityCheck", { activityAt: lastActivity, deadline });
+          const check = envelope("SESSION_ACTIVITY_CHECK", d.sessionId, {
+            reason: "host_inactive_15m",
+            activityAt: lastActivity,
+            deadline
+          }, { sender: { role: "server", id: "cloud" }, target: { role: "host", participantId: null } });
+          for (const ws of hostSockets) safeSend(ws, check);
+          await this.ctx.storage.setAlarm(deadline);
+          return;
+        }
+      }
     }
     const reason = d.ended ? (d.endReason || "host_closed_room")
       : absoluteDeadline <= now ? "session_expired" : "host_inactive_15m";
