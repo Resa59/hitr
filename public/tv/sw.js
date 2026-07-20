@@ -1,5 +1,5 @@
 "use strict";
-const CACHE="hitster-tv-v1.4.18-diagnose7";
+const CACHE="hitster-tv-v1.4.18-diagnose8";
 const ASSETS=["/tv/","/tv/tv.css","/tv/tv.js","/tv/spotify-tv-audio.js","/tv/qrcode.min.js","/tv/hitster-realtime-protocol.js","/tv/realtime-websocket-transport.js","/tv/manifest.webmanifest"];
 self.addEventListener("install",event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(ASSETS)).then(()=>self.skipWaiting())));
 self.addEventListener("activate",event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key!==CACHE).map(key=>caches.delete(key)))).then(()=>self.clients.claim())));
