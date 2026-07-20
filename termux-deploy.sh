@@ -1,7 +1,7 @@
 #!/data/data/com.termux/files/usr/bin/bash
 set -Eeuo pipefail
 
-EXPECTED_BUILD="1.4.18-diagnose5"
+EXPECTED_BUILD="1.4.18-diagnose6"
 HEALTH_URL="https://hitr.rdoe.workers.dev/api/health"
 REPO="${HOME}/hitr"
 PACKAGE_ROOT="$(cd "$(dirname "$0")" && pwd)"

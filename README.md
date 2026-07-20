@@ -1,4 +1,4 @@
-# Hitster Cloudflare 1.4.18-diagnose5 – Hybridtransport
+# Hitster Cloudflare 1.4.18-diagnose6 – Hybridtransport
 
 Dieses Paket enthält Worker, Durable Objects, Browser-Spieler und TV-Web-App für einen dauerhaft verfügbaren Cloud-Kontrollkanal plus optionalen lokalen WLAN-/Hotspot-Datenkanal.
 
@@ -34,7 +34,7 @@ Nach einmaliger Einrichtung genügt in Termux:
 hitster-deploy
 ```
 
-Das Paket enthält `termux-deploy.sh`, führt alle paketinternen Tests aus, aktualisiert `Resa59/hitr` und prüft anschließend den Health-Build `1.4.18-diagnose5`.
+Das Paket enthält `termux-deploy.sh`, führt alle paketinternen Tests aus, aktualisiert `Resa59/hitr` und prüft anschließend den Health-Build `1.4.18-diagnose6`.
 
 ## Kompatibilität
 

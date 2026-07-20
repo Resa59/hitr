@@ -5,6 +5,7 @@ const root = new URL('..', import.meta.url);
 const client = fs.readFileSync(new URL('public/play/index.html', root), 'utf8');
 const transport = fs.readFileSync(new URL('public/play/realtime-websocket-transport.js', root), 'utf8');
 const worker = fs.readFileSync(new URL('src/worker.js', root), 'utf8');
+const packageInfo = JSON.parse(fs.readFileSync(new URL('package.json', root), 'utf8'));
 
 assert.doesNotMatch(client, /id="retryLocal"|Direkt im WLAN versuchen/,
   'Transportwahl darf nicht als normale Nutzeraktion erscheinen');
@@ -20,7 +21,8 @@ assert.match(transport, /localProbeFailures = 0/,
   'Kandidatenänderung oder erfolgreiche Verbindung muss den Backoff zurücksetzen');
 assert.doesNotMatch(transport, /setInterval\(/,
   'Der Browsertransport darf kein periodisches Polling enthalten');
-assert.match(worker, /1\.4\.18-diagnose5/,
-  'Health-Build muss diagnose5 melden');
+const workerBuild = worker.match(/const BUILD = \"([^\"]+)\"/)?.[1];
+assert.equal(workerBuild, packageInfo.version,
+  'Worker-Build muss zur Paketversion passen');
 
-console.log('1.4.18-diagnose5: automatische Lokalwahl, Backoff und reduzierte Nutzeranzeige bestanden');
+console.log('Diagnose-5-Funktionsvertrag: automatische Lokalwahl, Backoff und reduzierte Nutzeranzeige bestanden');
