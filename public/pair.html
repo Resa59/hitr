@@ -1,14 +1,96 @@
-<!doctype html><html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Hitster TV</title><style>
-:root{color-scheme:dark;--bg:#080b10;--card:#171d2a;--line:#354055;--text:#f6f7fb;--muted:#a6afbf;--orange:#f7b32b;--green:#1ed760;--red:#ef5a67}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 50% 0,#172034,#080b10 42%);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,sans-serif;min-height:100vh}header{display:flex;align-items:center;gap:16px;padding:22px clamp(20px,4vw,54px);border-bottom:1px solid #263044;background:#0a0e15e8}.logo{width:54px;aspect-ratio:1;border-radius:50%;background:radial-gradient(circle,#fff 0 4px,#ff6b35 5px 13px,#131820 14px 21px,var(--orange) 22px 27px,#10141b 28px);box-shadow:0 0 0 7px #f7b32b12}.brand small{color:var(--orange);font-weight:900;letter-spacing:.08em}.brand h1{margin:2px 0 0;font-size:1.7rem}main{width:min(1100px,calc(100% - 30px));margin:30px auto}.card{padding:clamp(22px,4vw,48px);border:1px solid var(--line);border-radius:28px;background:linear-gradient(145deg,#1b2230,#11161e);box-shadow:0 28px 80px #0008;text-align:center}.eyebrow{color:var(--orange);font-weight:900;letter-spacing:.14em}.code{font-size:clamp(3.4rem,12vw,8rem);font-weight:950;letter-spacing:.12em;margin:.2em 0}.muted{color:var(--muted);line-height:1.55}.qr{width:236px;min-height:236px;margin:24px auto;padding:12px;border-radius:18px;background:#fff;display:grid;place-items:center}.qr img,.qr canvas{max-width:100%;height:auto}.status{display:inline-flex;align-items:center;gap:10px;padding:11px 16px;border:1px solid var(--line);border-radius:999px;background:#10151e}.dot{width:12px;height:12px;border-radius:50%;background:var(--orange)}.dot.on{background:var(--green);box-shadow:0 0 18px #1ed760aa}.claim{margin:24px auto 0;max-width:620px;padding:22px;border:1px solid #725d25;border-radius:20px;background:#2b2414}.buttons{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:16px}button{min-height:54px;padding:0 22px;border:0;border-radius:16px;background:linear-gradient(135deg,var(--orange),#ffd36d);color:#17110a;font:inherit;font-weight:900;cursor:pointer}button.deny{background:#252d3b;color:white;border:1px solid #465269}.stage{margin-top:28px}.disc{position:relative;width:min(42vw,300px);aspect-ratio:1;margin:24px auto;border-radius:50%;background:radial-gradient(circle,#fff 0 4px,#ff6b35 5px 24px,#111318 25px 51px,var(--orange) 52px 64px,#10141b 65px),repeating-radial-gradient(circle,#171c26 0 5px,#07090d 6px 11px);box-shadow:0 28px 70px #000a}.disc.playing{animation:spin 4.5s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}.song h2{font-size:clamp(2rem,6vw,5rem);margin:.2em 0}.song p{font-size:clamp(1.3rem,3vw,2.7rem);margin:.25em}.year{color:var(--orange);font-weight:900}.hidden{display:none!important}@media(max-width:600px){header{padding:16px 18px}.logo{width:46px}.brand h1{font-size:1.35rem}.card{border-radius:22px}.qr{width:210px;min-height:210px}}
-</style><script src="/assets/qrcode.min.js"></script></head><body><header><div class="logo"></div><div class="brand"><small>RESA LUKAS DÖRRENBERG</small><h1>Hitster TV</h1></div></header><main><section class="card"><span class="eyebrow">FERNSEHER VERBINDEN</span><h2>Mit dem Haupthandy koppeln</h2><p class="muted">Die Verbindung beginnt über die Cloud. Im gemeinsamen WLAN wechselt die neue Realtime-Verbindung anschließend automatisch auf den direkten lokalen Weg.</p><div id="status" class="status"><span id="dot" class="dot"></span><span id="statusText">TV-Code wird erstellt …</span></div><div id="code" class="code">------</div><div id="qr" class="qr"></div><p class="muted">Gib diesen Code in der Hitster-App ein oder scanne den QR-Code mit dem Cast-Menü.</p><div id="claim" class="claim hidden"><b id="claimText">Verbindungsanfrage</b><div class="buttons"><button id="approve">Zulassen</button><button id="deny" class="deny">Ablehnen</button></div></div><div id="stage" class="stage hidden"><div id="disc" class="disc"></div><div class="song"><h2 id="headline">Hitster</h2><p id="subline">Warte auf das Haupthandy</p><p id="year" class="year"></p></div></div></section></main><script>
-"use strict";const $=id=>document.getElementById(id);let pair=null,ws=null,currentClaim=null;
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
+  <meta name="theme-color" content="#100b22">
+  <title>Hitster TV verbinden</title>
+  <link rel="stylesheet" href="/tv/tv.css">
+  <script defer src="/tv/qrcode.min.js"></script>
+</head>
+<body class="pair-page">
+<header class="topbar">
+  <div class="brand">
+    <div class="record-logo" aria-hidden="true"><span></span></div>
+    <div class="brand-copy"><small>RESA LUKAS DÖRRENBERG</small><h1>Hitster TV</h1></div>
+  </div>
+  <div class="connection"><span id="dot" class="dot"></span><span id="statusText" class="connection-label">TV-Code wird erstellt …</span></div>
+</header>
+<main class="pair-main">
+  <section class="panel pair-panel">
+    <div class="pair-copy">
+      <span class="eyebrow">FERNSEHER VERBINDEN</span>
+      <h2 class="headline">Mit dem Haupthandy koppeln</h2>
+      <p class="subline">Scanne den QR-Code im TV-Menü der Hitster-App oder gib dort den sechsstelligen Code ein.</p>
+      <div class="pair-code-card"><span>TV-CODE</span><b id="code">––––––</b></div>
+      <div id="claim" class="pair-claim hidden">
+        <b id="claimText">Verbindungsanfrage vom Haupthandy</b>
+        <div class="pair-actions"><button id="approve" class="primary" type="button">Zulassen</button><button id="deny" class="secondary" type="button">Ablehnen</button></div>
+      </div>
+    </div>
+    <div class="pair-visual">
+      <div id="qr" class="pair-qr" aria-label="QR-Code zum Koppeln mit dem Haupthandy"></div>
+      <p>Die Cloud stellt nur die Kopplung her. Danach nutzt Hitster automatisch einen lokalen Datenweg, wenn er erreichbar ist.</p>
+    </div>
+    <div id="stage" class="pair-preview hidden">
+      <div id="disc" class="disc"></div>
+      <div class="song"><span class="eyebrow">VERBUNDEN</span><h3 id="headlinePreview">Hitster</h3><p id="sublinePreview">Warte auf das Haupthandy</p><p id="year" class="year"></p></div>
+    </div>
+  </section>
+</main>
+<script>
+"use strict";
+const $=id=>document.getElementById(id);let pair=null,ws=null,currentClaim=null,reconnectTimer=null,userRedirecting=false;
 function status(text,on=false){$("statusText").textContent=text;$("dot").classList.toggle("on",on)}
 function pairLink(p){return `${location.origin}/p/${encodeURIComponent(p.code)}/${encodeURIComponent(p.pairToken)}`}
-async function create(){const params=new URLSearchParams(location.search),notice=params.get("notice");if(notice)status(notice);const existing=params.get("code"),pairToken=params.get("pair");if(existing&&pairToken){pair={code:existing,pairToken};return ready()}const r=await fetch("/api/realtime/pair/create",{method:"POST",headers:{"content-type":"application/json"},body:"{}"}),j=await r.json();if(!r.ok)throw new Error(j.error||"TV-Code konnte nicht erstellt werden.");pair=j;ready()}
-function ready(){$("code").textContent=String(pair.code).replace(/(\d{3})(\d{3})/,"$1 $2");$("qr").innerHTML="";new QRCode($("qr"),{text:pairLink(pair),width:212,height:212,correctLevel:QRCode.CorrectLevel.M});connect();status("Bereit für die Verbindung")}
-function connect(){const u=`${location.origin.replace(/^http/i,"ws")}/api/realtime/pair/ws?code=${encodeURIComponent(pair.code)}&token=${encodeURIComponent(pair.pairToken)}`;ws=new WebSocket(u);ws.onopen=()=>status("Bereit für die Verbindung");ws.onmessage=e=>message(JSON.parse(String(e.data)));ws.onclose=()=>{status("Verbindung wird wiederhergestellt …");setTimeout(connect,1200)}}
-function message(m){if(m.type==="PAIR_READY"&&m.latestState)render(m.latestState);if(m.type==="CLAIM_REQUEST"||m.type==="REALTIME_CLAIM_REQUEST"){currentClaim=m.claim;$("claimText").textContent=`${m.claim.clientName||"Hitster Haupthandy"} möchte diesen Fernseher verbinden.`;$("claim").classList.remove("hidden")}if(m.type==="CLAIM_RESULT"&&m.claim?.status==="approved"){status("Mit dem Haupthandy verbunden",true);$("claim").classList.add("hidden")}if(m.type==="LEGACY_CONNECTED"){status("Mit dem Haupthandy verbunden · Cloud",true);$("claim").classList.add("hidden")}if(m.type==="LEGACY_STATE")render(m.state);if(m.type==="REALTIME_DESCRIPTOR")redirectRealtime(m.descriptor)}
-function redirectRealtime(d){const u=new URL("/tv/",location.origin),h=new URLSearchParams({v:"1",sid:d.sessionId,role:"tv",invite:d.inviteToken,cloud:d.cloudBaseUrl||location.origin});for(const local of d.localCandidates||[])h.append("local",local);u.hash=h.toString();status("Realtime-Verbindung wird geöffnet …",true);location.replace(u.toString())}
-function render(s){$("stage").classList.remove("hidden");status("Mit dem Haupthandy verbunden · Cloud",true);const phase=s.phase||s.screen||"";$("disc").classList.toggle("playing",phase==="playing"||phase==="answer");const song=s.song||{};$("headline").textContent=s.headline||song.title||"Hitster";$("subline").textContent=s.subline||song.artist||"Warte auf das Haupthandy";$("year").textContent=[song.decade,song.year].filter(Boolean).join(" · ")}
-$("approve").onclick=()=>{if(currentClaim)ws.send(JSON.stringify({type:"APPROVE",claimId:currentClaim.claimId}))};$("deny").onclick=()=>{if(currentClaim)ws.send(JSON.stringify({type:"DENY",claimId:currentClaim.claimId}));$("claim").classList.add("hidden")};create().catch(e=>status(e.message));
-</script></body></html>
+async function create(){
+  const params=new URLSearchParams(location.search),notice=params.get("notice"),existing=params.get("code"),pairToken=params.get("pair");
+  if(notice)status(notice);
+  if(existing&&pairToken){pair={code:existing,pairToken};return ready()}
+  const response=await fetch("/api/realtime/pair/create",{method:"POST",headers:{"content-type":"application/json"},body:"{}"});
+  const data=await response.json();if(!response.ok)throw new Error(data.error||"TV-Code konnte nicht erstellt werden.");pair=data;ready();
+}
+function ready(){
+  $("code").textContent=String(pair.code).replace(/(\d{3})(\d{3})/,"$1 $2");
+  $("qr").innerHTML="";
+  new QRCode($("qr"),{text:pairLink(pair),width:320,height:320,correctLevel:QRCode.CorrectLevel.M});
+  connect();status("Bereit für die Verbindung");
+}
+function connect(){
+  clearTimeout(reconnectTimer);
+  const url=`${location.origin.replace(/^http/i,"ws")}/api/realtime/pair/ws?code=${encodeURIComponent(pair.code)}&token=${encodeURIComponent(pair.pairToken)}`;
+  ws=new WebSocket(url);
+  ws.onopen=()=>status("Bereit für die Verbindung");
+  ws.onmessage=event=>message(JSON.parse(String(event.data)));
+  ws.onclose=()=>{if(userRedirecting)return;status("Verbindung wird wiederhergestellt …");reconnectTimer=setTimeout(connect,1200)};
+}
+function message(message){
+  if(message.type==="PAIR_READY"&&message.latestState)render(message.latestState);
+  if(message.type==="CLAIM_REQUEST"||message.type==="REALTIME_CLAIM_REQUEST"){
+    currentClaim=message.claim;$("claimText").textContent=`${message.claim.clientName||"Hitster Haupthandy"} möchte diesen Fernseher verbinden.`;$("claim").classList.remove("hidden");
+  }
+  if(message.type==="CLAIM_RESULT"&&message.claim?.status==="approved"){status("Mit dem Haupthandy verbunden",true);$("claim").classList.add("hidden")}
+  if(message.type==="LEGACY_CONNECTED"){status("Mit dem Haupthandy verbunden · Cloud",true);$("claim").classList.add("hidden")}
+  if(message.type==="LEGACY_STATE")render(message.state);
+  if(message.type==="REALTIME_DESCRIPTOR")redirectRealtime(message.descriptor);
+}
+function redirectRealtime(descriptor){
+  userRedirecting=true;
+  const url=new URL("/tv/",location.origin),hash=new URLSearchParams({v:"1",sid:descriptor.sessionId,role:"tv",invite:descriptor.inviteToken,cloud:descriptor.cloudBaseUrl||location.origin,audio:"1"});
+  for(const local of descriptor.localCandidates||[])hash.append("local",local);
+  url.hash=hash.toString();status("Hitster TV wird geöffnet …",true);location.replace(url.toString());
+}
+function render(state){
+  $("stage").classList.remove("hidden");status("Mit dem Haupthandy verbunden · Cloud",true);
+  const phase=state.phase||state.screen||"",song=state.song||{};
+  $("disc").classList.toggle("playing",phase==="playing"||phase==="answer");
+  $("headlinePreview").textContent=state.headline||song.title||"Hitster";
+  $("sublinePreview").textContent=state.subline||song.artist||"Warte auf das Haupthandy";
+  $("year").textContent=[song.decade,song.year].filter(Boolean).join(" · ");
+}
+$("approve").onclick=()=>{if(currentClaim)ws.send(JSON.stringify({type:"APPROVE",claimId:currentClaim.claimId}))};
+$("deny").onclick=()=>{if(currentClaim)ws.send(JSON.stringify({type:"DENY",claimId:currentClaim.claimId}));$("claim").classList.add("hidden")};
+create().catch(error=>status(error.message));
+</script>
+</body>
+</html>

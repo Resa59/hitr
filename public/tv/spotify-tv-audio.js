@@ -3,6 +3,7 @@
 
   const SDK_URL = "https://sdk.scdn.co/spotify-player.js";
   const PLAYER_NAME = "Hitster TV";
+  const READY_TIMEOUT_MS = 20000;
 
   class SpotifyTvAudioController {
     constructor(options = {}) {
@@ -14,6 +15,7 @@
       this.player = null;
       this.deviceId = "";
       this.sdkPromise = null;
+      this.connectPromise = null;
       this.sdkReady = false;
       this.connectedToSpotify = false;
       this.audioRequested = this.readAudioFlag();
@@ -22,15 +24,21 @@
       this.tokenRequestId = "";
       this.tokenCallbacks = [];
       this.tokenTimer = null;
+      this.readyTimer = null;
       this.lastTransport = "";
       this.lastError = "";
-      this.button?.addEventListener("click", () => this.handleButtonClick());
-      this.updateButton(this.audioRequested ? "loading" : "idle", this.audioRequested ? "TV-Ton wird vorbereitet" : "TV-Ton");
+      this.activationArmed = false;
+      this.button?.addEventListener("click", () => this.startAutomatically(true));
+      this.armActivationFromAnyInteraction();
+      this.updateButton("loading", "Spotify wird automatisch vorbereitet …");
     }
 
     readAudioFlag() {
-      try { return new URLSearchParams(location.hash.replace(/^#/, "")).get("audio") === "1"; }
-      catch (_) { return false; }
+      try {
+        // TV-Audio ist standardmäßig aktiv. audio=0 bleibt nur als technischer
+        // Diagnose-/Kompatibilitätsausgang erhalten.
+        return new URLSearchParams(location.hash.replace(/^#/, "")).get("audio") !== "0";
+      } catch (_) { return true; }
     }
 
     markAudioFlag() {
@@ -44,24 +52,44 @@
     }
 
     canSwitchLocal() {
-      // Web Playback benötigt einen sicheren HTTPS-Kontext. Sobald der Nutzer
-      // TV-Audio angefordert hat, bleibt die TV-Seite deshalb auf Cloudflare.
+      // Spotify Web Playback benötigt HTTPS. Der Cloud-Kontrollkanal bleibt
+      // ohnehin bestehen; für TV-Audio darf die Seite deshalb nicht auf eine
+      // unsichere lokale HTTP-Seite navigieren.
       return !this.audioRequested && !this.connectedToSpotify;
     }
 
     secureContextAvailable() {
-      return location.protocol === "https:" && (global.isSecureContext !== false);
+      return location.protocol === "https:" && global.isSecureContext !== false;
+    }
+
+    armActivationFromAnyInteraction() {
+      if (this.activationArmed) return;
+      this.activationArmed = true;
+      const activate = () => {
+        this.activationArmed = false;
+        document.removeEventListener("pointerdown", activate, true);
+        document.removeEventListener("keydown", activate, true);
+        try { this.player?.activateElement?.(); } catch (_) { }
+      };
+      document.addEventListener("pointerdown", activate, true);
+      document.addEventListener("keydown", activate, true);
     }
 
     onWelcome(transport) {
       this.lastTransport = transport || "";
       this.button?.classList.remove("hidden");
-      // Das vergleichsweise große Spotify-SDK wird erst nach ausdrücklicher
-      // Auswahl geladen. Dadurch bleiben normale TV-Partien datensparsam und
-      // die Web-App kann weiterhin bevorzugt ins lokale WLAN wechseln.
-      if (this.audioRequested && this.secureContextAvailable()) this.prepareSdk();
-      else this.updateButton("available", this.secureContextAvailable() ? "TV-Ton" : "TV-Ton über Cloud");
-      if (this.deviceId) this.sendCapability("ready", { ready: true, deviceId: this.deviceId, deviceName: PLAYER_NAME, activated: true });
+      this.audioRequested = true;
+      this.markAudioFlag();
+      if (!this.secureContextAvailable()) {
+        this.redirectToCloudAudio();
+        return;
+      }
+      if (this.deviceId) {
+        this.updateButton("ready", "Spotify bereit");
+        this.sendCapability("ready", { ready: true, deviceId: this.deviceId, deviceName: PLAYER_NAME, activated: true });
+        return;
+      }
+      void this.startAutomatically(false);
     }
 
     handleMessage(message) {
@@ -83,44 +111,56 @@
       return true;
     }
 
-    async handleButtonClick() {
+    async startAutomatically(userActivation = false) {
       if (!this.secureContextAvailable()) {
         this.redirectToCloudAudio();
-        return;
+        return "";
       }
       this.audioRequested = true;
       this.markAudioFlag();
       try {
-        if (!this.player) {
-          await this.prepareSdk(true);
-          this.updateButton("available", "TV-Ton jetzt aktivieren");
-          return;
+        const player = await this.prepareSdk(true);
+        if (userActivation) {
+          try { await player.activateElement?.(); } catch (_) { }
         }
-        // Der Aufruf selbst erfolgt vor dem ersten await direkt im Klickpfad.
-        // Falls das SDK erst geladen werden musste, fordert die Oberfläche deshalb
-        // bewusst einen zweiten kurzen Tastendruck an.
-        const activation = this.player.activateElement();
-        try { await activation; } catch (_) { }
+        if (this.deviceId && this.connectedToSpotify) return this.deviceId;
+        if (this.connectPromise) return await this.connectPromise;
         this.updateButton("connecting", "Spotify verbindet …");
-        this.sendCapability("activating", { supported: true, activated: true });
-        if (!this.connectedToSpotify) {
-          const success = await this.player.connect();
-          if (!success) throw new Error("Spotify Web Playback konnte nicht verbunden werden.");
-          this.connectedToSpotify = true;
-        } else if (this.deviceId) {
-          this.updateButton("ready", "TV-Ton bereit");
-          this.sendCapability("ready", { ready: true, deviceId: this.deviceId, deviceName: PLAYER_NAME, activated: true });
-        }
+        this.sendCapability("activating", { supported: true, activated: true, automatic: true });
+        this.connectPromise = (async () => {
+          const accepted = await player.connect();
+          if (!accepted) throw new Error("Spotify Web Playback konnte nicht verbunden werden.");
+          await new Promise((resolve, reject) => {
+            clearTimeout(this.readyTimer);
+            this.readyTimer = setTimeout(() => {
+              this.readyTimer = null;
+              reject(new Error("Spotify hat diesen Fernseher nicht als Wiedergabegerät bestätigt."));
+            }, READY_TIMEOUT_MS);
+            const check = () => {
+              if (this.deviceId && this.connectedToSpotify) resolve();
+              else if (this.connectPromise) setTimeout(check, 100);
+            };
+            check();
+          });
+          return this.deviceId;
+        })();
+        return await this.connectPromise;
       } catch (error) {
+        this.connectPromise = null;
+        this.connectedToSpotify = false;
         this.fail(error?.message || String(error), "initialization");
+        this.armActivationFromAnyInteraction();
+        return "";
       }
     }
+
+    async handleButtonClick() { return this.startAutomatically(true); }
 
     redirectToCloudAudio() {
       const descriptor = this.getDescriptor();
       const cloudBase = String(descriptor?.cloudBaseUrl || "").replace(/\/$/, "");
       if (!cloudBase || !descriptor) {
-        this.fail("Für TV-Ton wird die sichere Cloud-Verbindung benötigt.", "secure-context");
+        this.fail("Für Spotify-Ton wird die sichere Cloud-Seite benötigt.", "secure-context");
         return;
       }
       try {
@@ -148,8 +188,7 @@
           try {
             this.createPlayer();
             this.sdkReady = true;
-            this.updateButton("available", "TV-Ton aktivieren");
-            this.sendCapability("available", { supported: true, ready: false, secureContext: true });
+            this.sendCapability("available", { supported: true, ready: false, secureContext: true, automatic: true });
             resolve(this.player);
           } catch (error) { reject(error); }
         };
@@ -181,27 +220,33 @@
       this.player = new global.Spotify.Player({
         name: PLAYER_NAME,
         volume: 0.8,
-        enableMediaSession: false,
+        enableMediaSession: true,
         getOAuthToken: callback => this.provideToken(callback)
       });
       this.player.addListener("ready", ({ device_id }) => {
+        clearTimeout(this.readyTimer);
+        this.readyTimer = null;
+        this.connectPromise = null;
         this.deviceId = String(device_id || "");
-        this.connectedToSpotify = true;
-        this.updateButton("ready", "TV-Ton bereit");
-        this.sendCapability("ready", { supported: true, ready: true, deviceId: this.deviceId, deviceName: PLAYER_NAME, activated: true });
+        this.connectedToSpotify = !!this.deviceId;
+        this.updateButton("ready", "Spotify bereit");
+        this.sendCapability("ready", { supported: true, ready: true, deviceId: this.deviceId, deviceName: PLAYER_NAME, activated: true, automatic: true });
       });
       this.player.addListener("not_ready", ({ device_id }) => {
         if (!device_id || String(device_id) === this.deviceId) this.deviceId = "";
-        this.updateButton("error", "TV-Ton getrennt");
+        this.connectedToSpotify = false;
+        this.connectPromise = null;
+        this.updateButton("error", "Spotify nicht erreichbar · antippen zum Wiederholen");
         this.sendCapability("not-ready", { supported: true, ready: false, deviceId: String(device_id || "") });
       });
       this.player.addListener("player_state_changed", state => {
         if (!state) return;
-        this.updateButton(state.paused ? "ready" : "playing", state.paused ? "TV-Ton bereit" : "TV-Ton läuft");
+        this.updateButton(state.paused ? "ready" : "playing", state.paused ? "Spotify bereit" : "Spotify läuft");
         this.sendCapability("playback", { ready: !!this.deviceId, deviceId: this.deviceId, paused: !!state.paused });
       });
       this.player.addListener("autoplay_failed", () => {
-        this.updateButton("available", "TV-Ton erneut aktivieren");
+        this.updateButton("available", "Spotify wartet auf Bedienung");
+        this.armActivationFromAnyInteraction();
         this.sendCapability("autoplay-failed", { supported: true, ready: !!this.deviceId, deviceId: this.deviceId });
       });
       for (const eventName of ["initialization_error", "authentication_error", "account_error", "playback_error"]) {
@@ -224,7 +269,7 @@
         return;
       }
       this.tokenRequestId = this.P.randomId(12);
-      this.sendCapability("token-request", { requestId: this.tokenRequestId, reason: "web-playback", secureContext: true });
+      this.sendCapability("token-request", { requestId: this.tokenRequestId, reason: "web-playback", secureContext: true, automatic: true });
       clearTimeout(this.tokenTimer);
       this.tokenTimer = setTimeout(() => {
         this.tokenRequestId = "";
@@ -258,8 +303,10 @@
     }
 
     fail(message, code) {
-      this.lastError = String(message || "TV-Ton ist nicht verfügbar.").slice(0, 240);
-      this.updateButton("error", this.lastError);
+      clearTimeout(this.readyTimer);
+      this.readyTimer = null;
+      this.lastError = String(message || "Spotify ist auf diesem Fernseher nicht verfügbar.").slice(0, 240);
+      this.updateButton("error", `${this.lastError} · antippen zum Wiederholen`);
       this.sendCapability("error", { supported: false, ready: false, code: String(code || "error"), message: this.lastError });
     }
 
@@ -268,6 +315,7 @@
       this.button.dataset.state = state;
       this.button.textContent = label;
       this.button.title = label;
+      this.button.setAttribute("aria-label", label);
     }
   }
 
