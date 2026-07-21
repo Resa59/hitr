@@ -7,7 +7,7 @@ const phoneHost = read("../public/phone/spotify-phone-host.js");
 const tvTransport = read("../public/tv/realtime-websocket-transport.js");
 const tvJs = read("../public/tv/tv.js");
 
-assert.match(worker, /const BUILD = "1\.4\.18-diagnose1[0-3]"/);
+assert.match(worker, /const BUILD = "1\.4\.18-diagnose1[0-9]"/);
 assert.match(worker, /const CAPABILITIES = \[[^\n]*"inactivity-confirm-v1"/);
 assert.match(worker, /const INACTIVITY_CONFIRM_GRACE_MS = 15 \* 1000/);
 assert.match(worker, /envelope\("SESSION_ACTIVITY_CHECK"/);

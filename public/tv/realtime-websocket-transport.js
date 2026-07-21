@@ -75,6 +75,10 @@
       this.connecting = new Set();
       this.handshakeTimers = { cloud: null, local: null };
       this.localProbeTimer = null;
+      this.localProbeFailures = 0;
+      this.localCandidateSource = (Array.isArray(this.descriptor.localCandidates) && this.descriptor.localCandidates.length) ? "join-link" : "none";
+      this.localPermissionState = "unknown";
+      this.lastLocalFailure = "";
       this.cloudReconnectTimer = null;
       this.cloudReconnectAttempt = 0;
       this.pendingLocal = new Map();
@@ -101,8 +105,33 @@
         cloudConnected: !!this.cloudConnected,
         localConnected: !!this.localConnected,
         preferredDataPath: this.preferredDataPath,
-        active: this.active || ""
+        active: this.active || "",
+        localCandidateSource: this.localCandidateSource || "none",
+        localPermissionState: this.localPermissionState || "unknown",
+        lastLocalFailure: this.lastLocalFailure || "",
+        secureContext: !!global.isSecureContext
       };
+    }
+
+    async inspectLocalAccessCapability() {
+      let state = "unavailable";
+      try {
+        if (navigator.permissions?.query) {
+          const permission = await navigator.permissions.query({ name: "local-network-access" });
+          state = String(permission?.state || "unknown");
+        }
+      } catch (error) {
+        state = error?.name === "TypeError" ? "browser-does-not-expose-state" : `query-error:${error?.name || "Error"}`;
+      }
+      this.localPermissionState = state;
+      this.diagnostic("browser_local_capability", {
+        secureContext: !!global.isSecureContext,
+        pageProtocol: location.protocol,
+        permissionState: state,
+        targetAddressSpaceUsed: true,
+        privateIpLiteralCandidates: this.usableCandidates().filter(value => /^http:\/\/(?:10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.)/.test(value))
+      });
+      return state;
     }
 
     cloudWsUrl() {
@@ -124,7 +153,8 @@
         .filter(base => !this.isLoopbackBase(base)).slice(0, 8);
       const before = JSON.stringify(this.usableCandidates());
       this.descriptor.localCandidates = next;
-      this.diagnostic("local_candidates_updated", { source, candidates: next, changed: before !== JSON.stringify(next) });
+      this.localCandidateSource = next.length ? String(source || "unknown") : "none";
+      this.diagnostic("local_candidates_updated", { source: this.localCandidateSource, candidates: next, changed: before !== JSON.stringify(next) });
       if (before !== JSON.stringify(next) && this.cloudConfirmed && !this.localConfirmed) this.scheduleLocalProbe(80);
       return next;
     }
@@ -138,6 +168,7 @@
         hasSession: !!this.descriptor.sessionId,
         hasInvite: !!this.descriptor.inviteToken
       });
+      this.inspectLocalAccessCapability().catch(() => {});
       await this.openLink("cloud", this.cloudWsUrl());
     }
 
@@ -233,6 +264,8 @@
       if (name === "local") {
         this.localConnected = true;
         this.localConfirmed = true;
+        this.localProbeFailures = 0;
+        this.lastLocalFailure = "";
         this.preferredDataPath = "local";
         this.updateActive();
         this.cloudReconnectAttempt = 0;
@@ -274,7 +307,8 @@
       if (this.isLoopbackBase(base)) return null;
       const endpoint = `${base}/api/realtime/bootstrap?sid=${encodeURIComponent(this.descriptor.sessionId)}&t=${Date.now()}`;
       const started = Date.now();
-      this.diagnostic("local_probe_start", { candidate: base, timeoutMs, addressSpace: "local" });
+      await this.inspectLocalAccessCapability();
+      this.diagnostic("local_probe_start", { candidate: base, timeoutMs, addressSpace: "local", permissionState: this.localPermissionState });
       for (const includeAddressSpace of [true, false]) {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -291,12 +325,20 @@
           const data = await response.json();
           const wsUrl = String(data.wsUrl || "");
           if (wsUrl) {
-            this.diagnostic("local_probe_success", { candidate: base, wsUrl: wsUrl.replace(/\?.*$/, ""), includeAddressSpace, durationMs: Date.now() - started });
+            this.lastLocalFailure = "";
+            this.diagnostic("local_probe_success", { candidate: base, wsUrl: wsUrl.replace(/\?.*$/, ""), includeAddressSpace, durationMs: Date.now() - started, permissionState: this.localPermissionState });
             return { base, wsUrl };
           }
           this.diagnostic("local_probe_invalid_response", { candidate: base, includeAddressSpace });
         } catch (error) {
-          this.diagnostic("local_probe_failed", { candidate: base, includeAddressSpace, errorName: error?.name || "Error", error: error?.message || String(error), durationMs: Date.now() - started, pageProtocol: location.protocol });
+          const errorName = error?.name || "Error";
+          const classification = errorName === "AbortError"
+            ? "timeout-or-unreachable"
+            : (!global.isSecureContext ? "page-not-secure"
+              : (this.localPermissionState === "denied" ? "local-network-permission-denied"
+                : (errorName === "TypeError" ? "browser-blocked-or-network-unreachable" : "request-failed")));
+          this.lastLocalFailure = classification;
+          this.diagnostic("local_probe_failed", { candidate: base, includeAddressSpace, errorName, error: error?.message || String(error), classification, permissionState: this.localPermissionState, durationMs: Date.now() - started, pageProtocol: location.protocol });
         } finally { clearTimeout(timer); }
       }
       return null;

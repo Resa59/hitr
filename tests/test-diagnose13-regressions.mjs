@@ -10,8 +10,8 @@ const tvCss = read("../public/tv/tv.css");
 const tvSw = read("../public/tv/sw.js");
 const packageInfo = JSON.parse(read("../package.json"));
 
-assert.equal(packageInfo.version, "1.4.18-diagnose13");
-assert.match(worker, /const BUILD = "1\.4\.18-diagnose13"/);
+assert.equal(packageInfo.version, "1.4.18-diagnose18");
+assert.match(worker, /const BUILD = "1\.4\.18-diagnose18"/);
 assert.match(worker, /"phone-twa-player-v1"/);
 assert.match(worker, /"host-presence-v1"/);
 assert.match(worker, /"task-close-recovery-v2"/);
@@ -32,5 +32,5 @@ assert.match(tvJs, /hostOnline:null/);
 assert.match(tvJs, /Haupthandy nicht verbunden · Wiederverbindung läuft/);
 assert.match(tvCss, /\.disc-label:after\{content:none\}/);
 assert.match(tvCss, /transparent 0 17deg[\s\S]*transparent 58deg 186deg[\s\S]*transparent 234deg 360deg/);
-assert.match(tvSw, /hitster-tv-v1\.4\.18-diagnose13/);
-console.log("1.4.18-diagnose13: TWA-Player, direkter Tokenkanal, Host-Presence und zwei TV-Reflexionen bestanden");
+assert.match(tvSw, /hitster-tv-v1\.4\.18-diagnose18/);
+console.log("Diagnose-13-Funktionsvertrag in Diagnose 16: TWA-Player, direkter Tokenkanal, Host-Presence und zwei TV-Reflexionen bestanden");

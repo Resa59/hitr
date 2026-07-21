@@ -11,7 +11,7 @@ const tvJs = read("../public/tv/tv.js");
 const tvCss = read("../public/tv/tv.css");
 const tvSw = read("../public/tv/sw.js");
 
-assert.match(worker, /const BUILD = "1\.4\.18-diagnose(?:9|1[0-3])"/);
+assert.match(worker, /const BUILD = "1\.4\.18-diagnose(?:9|1[0-9])"/);
 assert.match(phone, /spotify-phone-host\.js/);
 assert.match(phoneHost, /enableMediaSession: true/);
 assert.match(phoneHost, /PHONE_TOKEN_REQUEST/);
@@ -22,5 +22,5 @@ assert.match(player, /requestFullscreen/);
 assert.doesNotMatch(tv, /id="tvAudioButton"/);
 assert.match(tvJs, /tryEnterFullscreen/);
 assert.match(tvCss, /tv-reflection-pulse/);
-assert.match(tvSw, /hitster-tv-v1\.4\.18-diagnose(?:9|1[0-3])/);
+assert.match(tvSw, /hitster-tv-v1\.4\.18-diagnose(?:9|1[0-9])/);
 console.log("1.4.18-diagnose9+: HTTPS-Handyplayer, Vollbild, TV-Autostart und sichtbare Plattenreflexionen bestanden");

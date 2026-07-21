@@ -1,4 +1,4 @@
-# Hitster Cloudflare 1.4.18-diagnose13 – Hybridtransport und sichere Spotify-Webplayer
+# Hitster Cloudflare 1.4.18-diagnose18 – Hybridtransport und sichere Spotify-Webplayer
 
 Dieses Paket enthält Worker, Durable Objects, Browser-Spieler, TV-Web-App und den sicheren HTTPS-Handyplayer unter `/phone/`.
 
@@ -35,7 +35,7 @@ Nach einmaliger Einrichtung genügt in Termux:
 hitster-deploy
 ```
 
-Das Paket enthält `termux-deploy.sh`, führt alle paketinternen Tests aus, aktualisiert `Resa59/hitr` und prüft anschließend den Health-Build `1.4.18-diagnose13`.
+Das Paket enthält `termux-deploy.sh`, führt alle paketinternen Tests aus, aktualisiert `Resa59/hitr` und prüft anschließend den Health-Build `1.4.18-diagnose18`.
 
 ## Kompatibilität
 

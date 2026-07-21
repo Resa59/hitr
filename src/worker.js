@@ -1,8 +1,8 @@
 import { DurableObject } from "cloudflare:workers";
 
 const VERSION = 1;
-const BUILD = "1.4.18-diagnose13";
-const CAPABILITIES = ["transport-selection-v1", "hybrid-data-channel-v1", "delivery-batch-v1", "tv-pair-v1", "host-activity-timeout-v1", "inactivity-confirm-v1", "phone-twa-player-v1", "host-presence-v1", "task-close-recovery-v2"];
+const BUILD = "1.4.18-diagnose18";
+const CAPABILITIES = ["transport-selection-v1", "hybrid-data-channel-v1", "delivery-batch-v1", "tv-pair-v1", "host-activity-timeout-v1", "inactivity-confirm-v1", "phone-twa-player-v1", "host-presence-v1", "task-close-recovery-v2", "twa-dal-v2", "phone-multiplayer-v2"];
 const MAX_BYTES = 32 * 1024;
 const SESSION_INACTIVITY_MS = 15 * 60 * 1000;
 const INACTIVITY_CONFIRM_GRACE_MS = 15 * 1000;
@@ -101,6 +101,15 @@ export default {
       }
       if (url.pathname === "/api/health" || url.pathname === "/api/realtime/health") {
         return cors(json({ ok: true, protocolVersion: VERSION, build: BUILD, capabilities: CAPABILITIES, service: "hitster-cloud-first", realtime: true }));
+      }
+      if (url.pathname === "/api/twa/diagnostics" && request.method === "GET") {
+        return cors(json({
+          ok: true, build: BUILD, origin: url.origin,
+          assetLinksPath: "/.well-known/assetlinks.json",
+          packageName: ANDROID_ASSET_LINKS[0].target.package_name,
+          sha256CertFingerprints: ANDROID_ASSET_LINKS[0].target.sha256_cert_fingerprints,
+          relations: ANDROID_ASSET_LINKS[0].relation
+        }));
       }
       if (url.pathname === "/api/realtime/session/open" && request.method === "POST") {
         const body = await readJson(request);
