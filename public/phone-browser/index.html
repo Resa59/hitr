@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0b0d11">
+  <title>Hitster Handy</title>
+  <style>
+    :root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color-scheme:dark;--bg:#0b0d11;--panel:#171c26;--line:#343c4b;--text:#f5f7fb;--muted:#aab3c2;--orange:#f7b32b}
+    *{box-sizing:border-box}html,body{margin:0;min-height:100%;background:radial-gradient(circle at 18% 0,#f7b32b20,transparent 32rem),var(--bg);color:var(--text)}
+    body{min-height:100svh;display:grid;place-items:center;padding:max(22px,env(safe-area-inset-top)) 20px max(22px,env(safe-area-inset-bottom))}
+    main{width:min(520px,100%);padding:28px;border:1px solid var(--line);border-radius:25px;background:linear-gradient(145deg,#1b2130,#121720);box-shadow:0 20px 70px #0009;text-align:center}
+    .record{position:relative;width:118px;height:118px;margin:0 auto 22px;border-radius:50%;background:repeating-radial-gradient(circle,#1b1f27 0 4px,#080a0e 5px 9px);box-shadow:0 18px 35px #0009;animation:spin 4.2s linear infinite}.record:before{content:"";position:absolute;inset:34%;border-radius:50%;background:conic-gradient(var(--orange),#ff6b35,#8f63ff,var(--orange));box-shadow:0 0 0 7px #0e1015}.record:after{content:"";position:absolute;inset:47%;border-radius:50%;background:#fff}@keyframes spin{to{transform:rotate(360deg)}}
+    small{display:block;color:var(--orange);font-weight:900;letter-spacing:.12em}h1{margin:8px 0 12px;font-size:clamp(1.8rem,7vw,2.7rem)}p{margin:0;color:var(--muted);line-height:1.55}.status{margin-top:20px;padding:14px;border:1px solid #4e452b;border-radius:14px;background:#f7b32b12;color:#ffd36d;font-weight:800}.error{border-color:#703b45;background:#ef5a6715;color:#ffabb2}.ready{border-color:#2e6849;background:#35c77a15;color:#8cf2b5}.hint{margin-top:16px;font-size:.82rem}
+  </style>
+</head>
+<body>
+<main>
+  <div class="record" aria-hidden="true"></div>
+  <small>HITSTER HANDY</small>
+  <h1>Spotify wird vorbereitet</h1>
+  <p>Hitster verwendet kurz den echten Browsermotor, aber ohne Adressleiste oder Browserbedienung. Die Musikverbindung geht direkt zu Spotify.</p>
+  <div id="status" class="status" role="status" aria-live="polite">Sichere Verbindung zur Hitster-App wird aufgebaut …</div>
+  <p class="hint">Sobald das Spotify-Gerät bereit ist, kehrt diese Ansicht automatisch zu Hitster zurück.</p>
+</main>
+<script src="/phone-browser/spotify-browser-player.js"></script>
+</body>
+</html>

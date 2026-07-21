@@ -82,9 +82,9 @@ main{min-width:0;min-height:0;display:flex;padding:clamp(9px,1.45vh,20px) var(--
 @media(max-width:850px),(max-aspect-ratio:4/3){.pair-page{height:auto;overflow:auto}.pair-main{height:auto;min-height:calc(100svh - 72px)}.pair-panel{height:auto;min-height:calc(100svh - 100px);grid-template-columns:1fr;overflow:visible}.pair-copy{text-align:center}.pair-code-card{margin-left:auto;margin-right:auto}.pair-qr{width:min(66vw,330px)}.pair-preview{grid-column:1}}
 @media(max-width:520px){.pair-panel{padding:20px 16px}.pair-code-card b{font-size:2.8rem}.pair-actions{display:grid}.pair-actions button{width:100%}}
 
-/* Diagnose 9 – asymmetrische Reflexe machen die Rotation auch aus TV-Abstand sichtbar. */
+/* Diagnose 13 – genau zwei breite Reflexe bis zum Plattenrand, ohne zusätzlichen Lichtstrich. */
 .disc-label{position:absolute;inset:0;border-radius:50%;pointer-events:none}
-.disc-label:before{content:"";position:absolute;inset:6%;border-radius:50%;background:conic-gradient(from 8deg,transparent 0 19deg,rgba(255,255,255,.04) 25deg,rgba(255,255,255,.34) 33deg,rgba(247,179,43,.13) 42deg,transparent 51deg 188deg,rgba(255,255,255,.03) 195deg,rgba(255,255,255,.27) 204deg,rgba(255,107,53,.11) 213deg,transparent 222deg 360deg);-webkit-mask:radial-gradient(circle,transparent 0 34%,#000 39% 93%,transparent 96%);mask:radial-gradient(circle,transparent 0 34%,#000 39% 93%,transparent 96%)}
-.disc-label:after{content:"";position:absolute;left:46%;top:7%;width:8%;height:19%;border-radius:999px;background:linear-gradient(180deg,rgba(255,255,255,.72),rgba(247,179,43,.08));box-shadow:0 0 18px rgba(255,255,255,.24)}
+.disc-label:before{content:"";position:absolute;inset:0;border-radius:50%;background:conic-gradient(from 8deg,transparent 0 17deg,rgba(255,255,255,.05) 23deg,rgba(255,255,255,.46) 34deg,rgba(247,179,43,.15) 45deg,transparent 58deg 186deg,rgba(255,255,255,.04) 194deg,rgba(255,255,255,.36) 207deg,rgba(255,107,53,.13) 220deg,transparent 234deg 360deg);-webkit-mask:radial-gradient(circle,transparent 0 31%,#000 37% 100%);mask:radial-gradient(circle,transparent 0 31%,#000 37% 100%)}
+.disc-label:after{content:none}
 .disc.playing .disc-label:before{animation:tv-reflection-pulse 1.5s ease-in-out infinite alternate}
 @keyframes tv-reflection-pulse{from{opacity:.54}to{opacity:1}}

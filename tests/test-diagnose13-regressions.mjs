@@ -1,0 +1,36 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+
+const read = path => fs.readFileSync(new URL(path, import.meta.url), "utf8");
+const worker = read("../src/worker.js");
+const browserHtml = read("../public/phone-browser/index.html");
+const browserJs = read("../public/phone-browser/spotify-browser-player.js");
+const tvJs = read("../public/tv/tv.js");
+const tvCss = read("../public/tv/tv.css");
+const tvSw = read("../public/tv/sw.js");
+const packageInfo = JSON.parse(read("../package.json"));
+
+assert.equal(packageInfo.version, "1.4.18-diagnose13");
+assert.match(worker, /const BUILD = "1\.4\.18-diagnose13"/);
+assert.match(worker, /"phone-twa-player-v1"/);
+assert.match(worker, /"host-presence-v1"/);
+assert.match(worker, /"task-close-recovery-v2"/);
+assert.match(worker, /\.well-known\/assetlinks\.json/);
+assert.match(worker, /delegate_permission\/common\.use_as_origin/);
+assert.match(browserHtml, /spotify-browser-player\.js/);
+assert.match(browserHtml, /Hitster Handy/);
+assert.match(browserJs, /TOKEN_REQUEST/);
+assert.match(browserJs, /TOKEN_RESPONSE/);
+assert.match(browserJs, /PLAYER_READY/);
+assert.match(browserJs, /attachAppPort/);
+assert.match(browserJs, /event\.ports/);
+assert.match(browserJs, /appPort\.postMessage/);
+assert.doesNotMatch(browserJs, /accessToken=.*location|URLSearchParams[^\n]*accessToken|localStorage|sessionStorage/);
+assert.match(worker, /let hostOnline = false/);
+assert.match(worker, /const tvPresence = envelope\("PRESENCE"/);
+assert.match(tvJs, /hostOnline:null/);
+assert.match(tvJs, /Haupthandy nicht verbunden · Wiederverbindung läuft/);
+assert.match(tvCss, /\.disc-label:after\{content:none\}/);
+assert.match(tvCss, /transparent 0 17deg[\s\S]*transparent 58deg 186deg[\s\S]*transparent 234deg 360deg/);
+assert.match(tvSw, /hitster-tv-v1\.4\.18-diagnose13/);
+console.log("1.4.18-diagnose13: TWA-Player, direkter Tokenkanal, Host-Presence und zwei TV-Reflexionen bestanden");

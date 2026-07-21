@@ -1,8 +1,8 @@
 import { DurableObject } from "cloudflare:workers";
 
 const VERSION = 1;
-const BUILD = "1.4.18-diagnose10";
-const CAPABILITIES = ["transport-selection-v1", "hybrid-data-channel-v1", "delivery-batch-v1", "tv-pair-v1", "host-activity-timeout-v1", "inactivity-confirm-v1"];
+const BUILD = "1.4.18-diagnose13";
+const CAPABILITIES = ["transport-selection-v1", "hybrid-data-channel-v1", "delivery-batch-v1", "tv-pair-v1", "host-activity-timeout-v1", "inactivity-confirm-v1", "phone-twa-player-v1", "host-presence-v1", "task-close-recovery-v2"];
 const MAX_BYTES = 32 * 1024;
 const SESSION_INACTIVITY_MS = 15 * 60 * 1000;
 const INACTIVITY_CONFIRM_GRACE_MS = 15 * 1000;
@@ -11,7 +11,7 @@ const PLAYER_TYPES = new Set(["TRANSPORT_SELECTED", "ANSWER_SUBMITTED", "SCORE_C
 const TV_TYPES = new Set(["TRANSPORT_SELECTED", "TV_READY", "TV_AUDIO_CAPABILITY", "ACK", "PING", "LEAVE"]);
 const HOST_TYPES = new Set(["PLAYER_SNAPSHOT", "PLAYER_STATE", "PLAYER_PRIVATE_STATE", "TV_SNAPSHOT", "TV_STATE", "SESSION_ENDED", "ERROR", "PRESENCE", "TV_AUDIO_TOKEN", "DELIVERY_BATCH"]);
 const ANDROID_ASSET_LINKS = [{
-  relation: ["delegate_permission/common.handle_all_urls"],
+  relation: ["delegate_permission/common.handle_all_urls", "delegate_permission/common.use_as_origin"],
   target: {
     namespace: "android_app",
     package_name: "de.resa.hitstertrainer",
@@ -557,11 +557,15 @@ export class SessionRoom extends DurableObject {
       }
     }
   }
-  async publishPresence() {
+  async publishPresence(excludedSocket = null) {
     const d = await this.descriptorValue(); if (!d) return;
     const online = new Set(), onlinePlayers = new Set(), onlineTv = new Set();
+    let hostOnline = false;
     for (const ws of this.sockets()) {
-      const a = wsAttachment(ws); if (!a.authenticated || !a.selected) continue;
+      if (excludedSocket && ws === excludedSocket) continue;
+      const a = wsAttachment(ws); if (!a.authenticated) continue;
+      if (a.role === "host") { hostOnline = true; continue; }
+      if (!a.selected) continue;
       online.add(a.participantId);
       if (a.role === "player") onlinePlayers.add(a.participantId);
       if (a.role === "tv") onlineTv.add(a.participantId);
@@ -572,19 +576,25 @@ export class SessionRoom extends DurableObject {
     const tvList = Object.values(roster).filter(record => record.role === "tv").map(record => ({ participantId: record.participantId, deviceId: record.deviceId || record.participantId, name: record.displayName, displayName: record.displayName, online: online.has(record.participantId) }));
     const message = envelope("PRESENCE", d.sessionId, { players, tv, playerList, tvList }, { sender: { role: "server", id: "cloud" }, target: { role: "host", participantId: null } });
     for (const ws of this.sockets()) if (wsAttachment(ws).role === "host") safeSend(ws, message);
-    const publicPresence = envelope("PRESENCE", d.sessionId, { players: playerList, playerCount: players, tvCount: tv }, { sender: { role: "server", id: "cloud" }, target: { role: "player", participantId: null } });
+    const publicPresence = envelope("PRESENCE", d.sessionId, { players: playerList, playerCount: players, tvCount: tv, hostOnline }, { sender: { role: "server", id: "cloud" }, target: { role: "player", participantId: null } });
+    const tvPresence = envelope("PRESENCE", d.sessionId, { hostOnline, playerCount: players, tvCount: tv }, { sender: { role: "server", id: "cloud" }, target: { role: "tv", participantId: null } });
     for (const ws of this.sockets()) {
+      if (excludedSocket && ws === excludedSocket) continue;
       const a = wsAttachment(ws);
-      if (a.authenticated && a.selected && a.role === "player") safeSend(ws, publicPresence);
+      if (!a.authenticated) continue;
+      if (a.selected && a.role === "player") safeSend(ws, publicPresence);
+      // Der Cloudkanal bleibt für Fernseher auch bei lokalem Nutzdatenweg der
+      // Kontrollkanal. Host-Verlust muss deshalb unabhängig von selected ankommen.
+      if (a.role === "tv") safeSend(ws, tvPresence);
     }
   }
   async webSocketClose(ws) {
     const attachment = wsAttachment(ws);
-    if (attachment.authenticated && attachment.selected && attachment.role !== "host") await this.publishPresence();
+    if (attachment.authenticated) await this.publishPresence(ws);
   }
   async webSocketError(ws) {
     const attachment = wsAttachment(ws);
-    if (attachment.authenticated && attachment.selected && attachment.role !== "host") await this.publishPresence();
+    if (attachment.authenticated) await this.publishPresence(ws);
   }
   async alarm() {
     const d = await this.descriptorValue();
